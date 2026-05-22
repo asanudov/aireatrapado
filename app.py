@@ -6,29 +6,47 @@ import plotly.graph_objects as go
 # 1. CONFIGURACIÓN DE PÁGINA Y ESTILOS
 st.set_page_config(page_title="Analizador de Aire Atrapado", layout="wide")
 
-# CSS personalizado para maximizar ancho horizontal y ajustar títulos
+# CSS personalizado: Máximo ancho horizontal, ajuste de títulos y personalización del botón de reemplazo (+)
 st.markdown("""
     <style>
     .block-container { padding-top: 1.5rem; padding-bottom: 0rem; padding-left: 2rem; padding-right: 2rem; }
     h1 { font-size: 1.8rem !important; font-weight: 700; color: #1E3A8A; }
     .discreet-note { font-size: 11px; color: #888; margin-top: 30px; border-top: 1px solid #eee; padding-top: 10px; }
     [data-testid="stSidebar"] h1 { font-size: 1.2rem !important; line-height: 1.3; }
+    
+    /* Inyección de estilos para sustituir el '+' por 'Carga un archivo diferente' */
+    [data-testid="stFileUploaderDropzone"] button::before {
+        content: "Carga un archivo diferente";
+        font-size: 13px;
+        color: #1E40AF;
+        font-weight: 600;
+    }
+    [data-testid="stFileUploaderDropzone"] button svg {
+        display: none !important; /* Oculta el signo + nativo */
+    }
+    [data-testid="stFileUploaderDropzone"] button {
+        width: 100% !important;
+        background-color: #f0f4f8 !important;
+        border: 1px dashed #1E40AF !important;
+        padding: 6px 12px !important;
+        height: auto !important;
+    }
     </style>
 """, unsafe_allow_html=True)
 
-# 2. BARRA LATERAL (SIDEBAR) - Reestructurada por UI
+# 2. BARRA LATERAL (SIDEBAR) - Estructura Visual Solicitada
 st.sidebar.title("Analizador de Aire Atrapado en Conductos a Presión")
 
-# A. Botón de carga movido al inicio (arriba)
+# A. Cargador de archivos en la parte superior
 uploaded_file = st.sidebar.file_uploader("Carga tu perfil en Excel o CSV", type=["xlsx", "csv"])
 
 st.sidebar.markdown("---")
 
-# B. Entradas de parámetros abajo de la carga (Sin botones + / - usando text_input)
+# B. Entradas numéricas abajo de la carga (Campos limpios sin botones + / -)
 q_input = st.sidebar.text_input("Caudal (m³/s)", value="0.075")
 d_input = st.sidebar.text_input("Diámetro Interno (m)", value="0.305")
 
-# Validación y conversión de entradas de texto a flotantes de forma segura
+# Conversión segura de cadenas a flotantes para evitar caídas de ejecución
 try:
     q_m3s = float(q_input) if q_input else 0.000
     d_m = float(d_input) if d_input else 0.010
@@ -38,7 +56,7 @@ except ValueError:
 
 st.sidebar.markdown("---")
 
-# Instrucciones de formato del .csv estrictas
+# C. Instrucciones estrictas de formato para el archivo
 st.sidebar.info("""
 **Instrucciones de formato del archivo:**
 1. Debe contener dos columnas.
@@ -51,7 +69,7 @@ st.sidebar.info("""
 st.sidebar.markdown("---")
 st.sidebar.write("**Desarrollado por: M.I. Alan Sañudo**")
 
-# 3. CUERPO PRINCIPAL
+# 3. CUERPO PRINCIPAL DE LA APLICACIÓN
 st.title("Analizador de Aire Atrapado en Conductos a Presión")
 
 if uploaded_file:
@@ -61,50 +79,50 @@ if uploaded_file:
         else:
             df = pd.read_excel(uploaded_file)
         
-        # Normalizar nombres de columnas
+        # Normalización estricta de nombres de columnas
         df.columns = [c.lower().strip() for c in df.columns]
         
-        # Mapeo dinámico de los encabezados
+        # Mapeo por prioridades de los encabezados válidos
         col_x = next((c for c in df.columns if c in ['cadenamiento', 'distancia', 'x']), None)
         col_z = next((c for c in df.columns if c in ['elevación', 'elevacion', 'y']), None)
 
         if col_x and col_z:
             g = 9.81
             
-            # Alerta técnica de Diámetro Crítico
+            # Alerta preventiva por criterios de capilaridad (Zukoski)
             if d_m < 0.100:
                 st.warning("⚠️ **Nota técnica:** El diámetro ingresado es menor a 100 mm (4 pulgadas). En tuberías pequeñas, los efectos de tensión superficial y capilaridad pueden alterar el comportamiento del aire respecto al modelo matemático de arrastre hidráulico por gravedad.")
 
-            # ---- LÓGICA DE CÁLCULO: MANUAL II-UNAM ----
-            # 1. Gasto Adimensional (PGA) constante del sistema
+            # ---- MOTOR DE CÁLCULO: METODOLOGÍA MANUAL II-UNAM ----
+            # 1. Gasto Adimensional (PGA) del flujo constante del sistema
             pga_sistema = q_m3s / np.sqrt(g * (d_m**5)) if d_m > 0 else 0
             
-            # 2. Detección geométrica de puntos altos (Picos locales por flotación)
+            # 2. Análisis geométrico de picos (Crestas locales de acumulación por flotación)
             df['es_cresta'] = (df[col_z] > df[col_z].shift(1)) & (df[col_z] > df[col_z].shift(-1))
             
-            # 3. Análisis cinemático por tramos
+            # 3. Análisis cinemático de diferenciales por tramo
             df['dx'] = df[col_x].diff()
             df['dz'] = df[col_z].diff()
             
-            # Pendiente S (El manual la define positiva si el tramo es descendente)
+            # Pendiente geométrica S (Definida positiva para tramos descendentes en el manual de la UNAM)
             df['S'] = -df['dz'] / df['dx'].replace(0, np.nan)
             
-            # 4. Evaluación de la Capacidad de Arrastre
+            # 4. Evaluación de la Capacidad de Arrastre (Condición Crítica: Tramo descendente y PGA insuficiente)
             df['riesgo_hidraulico'] = (df['S'] > 0) & (pga_sistema < np.sqrt(df['S'].fillna(0)))
             
-            # Calcular la Velocidad Crítica de remoción (Kalinske y Bliss)
+            # Velocidad Crítica límite para el reporte (Ecuación analítica de Kalinske y Bliss)
             df['v_critica'] = 1.146 * np.sqrt(g * d_m * df['S'])
             df['v_critica'] = df['v_critica'].fillna(0)
             
-            # Velocidad real del flujo
+            # Velocidad cinemática real en el conducto
             area = np.pi * (d_m**2) / 4 if d_m > 0 else 1
             v_real = q_m3s / area
 
-            # 4. GRÁFICO DE PERFIL LONGITUDINAL (OPTIMIZADO EN LA HORIZONTAL)
+            # 4. COMPONENTE GRÁFICO (MÁXIMA AMPLITUD HORIZONTAL)
             st.subheader("Perfil Longitudinal del Acueducto")
             fig = go.Figure()
 
-            # Trazado de la tubería
+            # Trazado base de la tubería
             fig.add_trace(go.Scatter(
                 x=df[col_x], y=df[col_z], 
                 mode='lines', 
@@ -112,7 +130,7 @@ if uploaded_file:
                 line=dict(color='#1E40AF', width=2.5)
             ))
 
-            # Marcadores de Puntos Altos
+            # Marcadores geométricos de Puntos Altos (Simbología exacta solicitada)
             crestas = df[df['es_cresta']]
             fig.add_trace(go.Scatter(
                 x=crestas[col_x], y=crestas[col_z], 
@@ -121,7 +139,7 @@ if uploaded_file:
                 name='Punto alto, acumulación por flotación'
             ))
 
-            # Resaltar en rojo los tramos con arrastre insuficiente
+            # Resaltado en rojo grueso para los tramos con arrastre insuficiente
             for i in range(1, len(df)):
                 if df.loc[i, 'riesgo_hidraulico']:
                     fig.add_trace(go.Scatter(
@@ -133,7 +151,7 @@ if uploaded_file:
                         showlegend=(i == df['riesgo_hidraulico'].idxmax())
                     ))
 
-            # Layout optimizado con leyenda abajo
+            # Layout optimizado: Forzado de leyendas al eje inferior (y=-0.18) para liberar la horizontal
             fig.update_layout(
                 xaxis_title="Distancia (m)", 
                 yaxis_title="Elevación (m)", 
@@ -150,7 +168,7 @@ if uploaded_file:
             )
             st.plotly_chart(fig, use_container_width=True)
 
-            # 5. TABLA DE REPORTES / RESULTADOS
+            # 5. MATRIZ DE RESULTADOS / REPORTES
             st.subheader("Reporte General de Puntos Críticos")
             res_table = df[(df['es_cresta']) | (df['riesgo_hidraulico'])].copy()
             
@@ -181,7 +199,7 @@ if uploaded_file:
 else:
     st.info("👈 Por favor, ingresa tu archivo de perfil (.csv o .xlsx) y configura las variables en el menú lateral para iniciar el análisis hidráulico.")
 
-# 6. BIBLIOGRAFÍA NOTA DISCRETA
+# 6. BIBLIOGRAFÍA DE RESPALDO INSTITUCIONAL
 st.markdown("""
 <div class="discreet-note">
     <strong>Fuentes técnicas e institucionales de referencia:</strong><br>
