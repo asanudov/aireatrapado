@@ -25,33 +25,6 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# ALGORITMO RAMER-DOUGLAS-PEUCKER (RDP)
-def find_distance(pt, pt1, pt2):
-    if np.all(pt1 == pt2):
-        return np.linalg.norm(pt - pt1)
-    return np.divide(
-        np.abs(np.cross(pt2 - pt1, pt1 - pt)),
-        np.linalg.norm(pt2 - pt1)
-    )
-
-def ramer_douglas_peucker(points, epsilon):
-    if len(points) < 3:
-        return points
-    dmax = 0.0
-    index = 0
-    end = len(points) - 1
-    for i in range(1, end):
-        d = find_distance(points[i], points[0], points[end])
-        if d > dmax:
-            index = i
-            dmax = d
-    if dmax > epsilon:
-        results1 = ramer_douglas_peucker(points[:index+1], epsilon)
-        results2 = ramer_douglas_peucker(points[index:], epsilon)
-        return np.vstack((results1[:-1], results2))
-    else:
-        return np.vstack((points[0], points[end]))
-
 # 2. BARRA LATERAL (SIDEBAR)
 st.sidebar.title("Analizador Hidráulico de Conducciones")
 
@@ -72,23 +45,18 @@ if uploaded_file is not None:
 
 st.sidebar.markdown("---")
 
-# Parámetros Hidráulicos reales para El Realito
+# Parámetros Hidráulicos de Entrada
 q_input = st.sidebar.text_input("Caudal de Diseño Q (m³/s)", value="0.565")
 d_input = st.sidebar.text_input("Diámetro Interno D (m)", value="1.219")
 
 st.sidebar.markdown("---")
-st.sidebar.markdown("**Simplificación del Perfil**")
-epsilon_val = st.sidebar.slider(
-    "Tolerancia de Rectas (m)", 
-    min_value=0.5, max_value=15.0, value=3.0, step=0.5,
-    help="Filtra el ruido vertical para tirar líneas rectas maestras uniformes."
-)
+st.sidebar.markdown("**Filtro de Segmentación Técnica**")
 
-# NUEVO FILTRO: UMBRAL DE LONGITUD MÍNIMA DE TRAMO
+# NUEVO SLIDER SOLICITADO: Ajustado de 10 a 500 metros, con paso de 10 en 10
 longitud_minima_tramo = st.sidebar.slider(
     "Longitud Mínima de Tramo (m)",
-    min_value=100, max_value=2000, value=500, step=100,
-    help="Los tramos rectos con una longitud horizontal menor a este valor se ignorarán en el análisis de válvulas intermedias para evitar sobrediseño por micro-pendientes locales."
+    min_value=10, max_value=500, value=200, step=10,
+    help="Define la longitud mínima horizontal que debe tener una pendiente continua para ser evaluada bajo el criterio de protección anticolapso."
 )
 
 st.sidebar.markdown("---")
@@ -139,45 +107,44 @@ if uploaded_file:
             except ValueError:
                 q_m3s, d_m = 0.565, 1.219
 
-            # ---- MOTOR 1: ALGORITMO RDP PARA PERFIL EN TRAMOS RECTOS ----
-            puntos_originales = df[[col_x, col_z]].to_numpy()
-            puntos_simplificados = ramer_douglas_peucker(puntos_originales, epsilon_val)
-            
-            df_rdp = pd.DataFrame(puntos_simplificados, columns=[col_x, 'z_recta'])
-            df['z_simplificada'] = np.interp(df[col_x], df_rdp[col_x], df_rdp['z_recta'])
-            
-            df['es_vertice'] = df[col_x].isin(df_rdp[col_x])
-            df['es_cresta'] = df['es_vertice'] & (df['z_simplificada'] > df['z_simplificada'].shift(1, fill_value=df['z_simplificada'].iloc[0])) & (df['z_simplificada'] > df['z_simplificada'].shift(-1, fill_value=df['z_simplificada'].iloc[-1]))
-            df['es_valle'] = df['es_vertice'] & (df['z_simplificada'] < df['z_simplificada'].shift(1, fill_value=df['z_simplificada'].iloc[0])) & (df['z_simplificada'] < df['z_simplificada'].shift(-1, fill_value=df['z_simplificada'].iloc[-1]))
+            # Como removimos la tolerancia de rectas, la geometría de diseño coincide directamente con el perfil real
+            df['z_diseño'] = df[col_z]
 
-            # ---- MOTOR 2: ANÁLISIS HIDRÁULICO (PGA / UNAM) ----
+            # Determinamos crestas y valles reales locales para ubicar los hitos geométricos base
+            df['es_cresta'] = (df['z_diseño'] > df['z_diseño'].shift(1, fill_value=df['z_diseño'].iloc[0])) & (df['z_diseño'] > df['z_diseño'].shift(-1, fill_value=df['z_diseño'].iloc[-1]))
+            df['es_valle'] = (df['z_diseño'] < df['z_diseño'].shift(1, fill_value=df['z_diseño'].iloc[0])) & (df['z_diseño'] < df['z_diseño'].shift(-1, fill_value=df['z_diseño'].iloc[-1]))
+
+            # ---- MOTOR 1: ANÁLISIS HIDRÁULICO LOCAL RE-ESTABLECIDO (PGA / UNAM) ----
             pga_sistema = q_m3s / np.sqrt(g * (d_m**5)) if d_m > 0 else 0
             
-            df['dx_sim'] = df[col_x].diff()
-            df['dz_sim'] = df['z_simplificada'].diff()
-            df['S_sim'] = -df['dz_sim'] / df['dx_sim'].replace(0, np.nan)
+            df['dx'] = df[col_x].diff()
+            df['dz'] = df['z_diseño'].diff()
+            df['S'] = -df['dz'] / df['dx'].replace(0, np.nan)
             
-            df['riesgo_hidraulico'] = (df['S_sim'] > 0) & (pga_sistema < np.sqrt(df['S_sim'].fillna(0)))
-            df['v_critica'] = 1.146 * np.sqrt(g * d_m * df['S_sim']).fillna(0)
+            df['riesgo_hidraulico'] = (df['S'] > 0) & (pga_sistema < np.sqrt(df['S'].fillna(0)))
+            df['v_critica'] = 1.146 * np.sqrt(g * d_m * df['S']).fillna(0)
             
             area = np.pi * (d_m**2) / 4 if d_m > 0 else 1
             v_real = q_m3s / area
 
-            # ---- MOTOR 3: VÁLVULAS INTERMEDIAS CON FILTRO DE LONGITUD MÍNIMA ----
+            # ---- MOTOR 2: ANÁLISIS ANTICOLAPSO EN PENDIENTES CONTINUAS POR LONGITUD ----
             df['critico_pendiente_larga'] = False
             
             if activar_anticolapso:
-                df_vertices = df[df['es_vertice']].copy().sort_values(by=col_x).reset_index()
+                # Identificamos los nodos que marcan un quiebre relevante (cambio de signo en la pendiente local)
+                df_quiebres = df[df['es_cresta'] | df['es_valle']].copy().sort_values(by=col_x).reset_index()
                 
-                for idx in range(len(df_vertices) - 1):
-                    nodo_a = df_vertices.loc[idx]
-                    nodo_b = df_vertices.loc[idx+1]
+                for idx in range(len(df_quiebres) - 1):
+                    nodo_a = df_quiebres.loc[idx]
+                    nodo_b = df_quiebres.loc[idx+1]
                     
                     longitud_horizontal_tramo = abs(nodo_b[col_x] - nodo_a[col_x])
                     
+                    # FILTRO DE RELEVANCIA LONGITUDINAL SOLICITADO
                     if longitud_horizontal_tramo >= longitud_minima_tramo:
-                        diff_vertical_tramo = abs(nodo_a['z_simplificada'] - nodo_b['z_simplificada'])
+                        diff_vertical_tramo = abs(nodo_a['z_diseño'] - nodo_b['z_diseño'])
                         
+                        # Si el desnivel acumulado supera el vacío crítico admisible en la bajada/subida macro
                         if diff_vertical_tramo > limite_critico_vertical:
                             num_valvulas = int(diff_vertical_tramo // limite_critico_vertical)
                             
@@ -193,55 +160,47 @@ if uploaded_file:
                                     idx_cercano = (rango_tramo[col_x] - x_objetivo).abs().idxmin()
                                     df.loc[idx_cercano, 'critico_pendiente_larga'] = True
 
-            # 4. COMPONENTE GRÁFICO AVANZADO EN TRAMOS RECTOS
+            # 4. COMPONENTE GRÁFICO ALTAMENTE PRECIOSO Y LIMPIO
             fig = go.Figure()
 
-            # Perfil Real con ruido (Gris claro)
+            # Perfil Real de la Conducción
             fig.add_trace(go.Scatter(
-                x=df[col_x], y=df[col_z], 
+                x=df[col_x], y=df['z_diseño'], 
                 mode='lines', 
-                name='Terreno Levantamiento (Ruido)', 
-                line=dict(color='#E2E8F0', width=1)
-            ))
-
-            # Perfil Simplificado Maestros (Azul)
-            fig.add_trace(go.Scatter(
-                x=df[col_x], y=df['z_simplificada'], 
-                mode='lines', 
-                name='Perfil de Diseño (Tramos Rectos)', 
+                name='Perfil del Acueducto (El Realito)', 
                 line=dict(color='#1E40AF', width=2)
             ))
 
-            # Crestas Macroscópicas Maestras
-            macro_crestas = df[df['es_cresta']]
-            if not macro_crestas.empty:
+            # Puntos Altos Geométricos principales
+            p_altos = df[df['es_cresta']]
+            if not p_altos.empty:
                 fig.add_trace(go.Scatter(
-                    x=macro_crestas[col_x], y=macro_crestas['z_simplificada'], 
+                    x=p_altos[col_x], y=p_altos['z_diseño'], 
                     mode='markers', 
                     marker=dict(color='#F59E0B', size=8, symbol='triangle-up', line=dict(color='black', width=0.5)),
-                    name='Punto Alto Geométrico Macro'
+                    name='Punto Alto Geométrico'
                 ))
 
-            # Tramos Críticos por Arrastre de Aire Insuficiente (Riesgo PGA en Rojo)
+            # Segmentos con Riesgo de Aire Atrapado (PGA) en Rojo
             for i in range(1, len(df)):
                 if df.loc[i, 'riesgo_hidraulico']:
                     fig.add_trace(go.Scatter(
                         x=[df.loc[i-1, col_x], df.loc[i, col_x]], 
-                        y=[df.loc[i-1, 'z_simplificada'], df.loc[i, 'z_simplificada']],
+                        y=[df.loc[i-1, 'z_diseño'], df.loc[i, 'z_diseño']],
                         mode='lines', 
                         line=dict(color='#DC2626', width=4),
-                        name='Riesgo PGA: Arrastre de Aire Insuficiente' if i == df['riesgo_hidraulico'].idxmax() else "",
+                        name='Riesgo PGA: Arrastre Insuficiente' if i == df['riesgo_hidraulico'].idxmax() else "",
                         showlegend=(i == df['riesgo_hidraulico'].idxmax())
                     ))
 
-            # Válvulas Intermedias Anticolapso (Icono cuadrado muy pequeño)
+            # Válvulas Intermedias Anticolapso (Icono cuadrado muy pequeño size=5)
             if activar_anticolapso:
                 p_largas = df[df['critico_pendiente_larga']]
                 fig.add_trace(go.Scatter(
-                    x=p_largas[col_x], y=p_largas['z_simplificada'], 
+                    x=p_largas[col_x], y=p_largas['z_diseño'], 
                     mode='markers', 
                     marker=dict(color='#D946EF', size=5, symbol='square', line=dict(color='black', width=0.5)),
-                    name='Válvula Intermedia (Macro-Tramo Recto)'
+                    name='Válvula Intermedia (Criterio Anticolapso)'
                 ))
 
             fig.update_layout(
@@ -254,7 +213,7 @@ if uploaded_file:
             )
             st.plotly_chart(fig, use_container_width=True)
 
-            # 5. MATRIZ DE RESULTADOS / REPORTE GENERAL
+            # 5. MATRIZ DE RESULTADOS COMPLETAMENTE CORREGIDA
             st.subheader("Reporte General de Nodos Críticos Detectados")
             
             res_table = df[(df['es_cresta']) | (df['riesgo_hidraulico']) | (df['critico_pendiente_larga'])].copy()
@@ -267,18 +226,18 @@ if uploaded_file:
                 ]
                 elecciones = [
                     "Válvula Intermedia Sugerida (Pendiente Larga Anticolapso)",
-                    "Punto Alto Geométrico Macro (Bolsa Permanente)",
+                    "Punto Alto Geométrico (Bolsa Permanente)",
                     "Tramo de Riesgo PGA (Arrastre Insuficiente)"
                 ]
                 res_table['Diagnóstico Técnico'] = np.select(condiciones, elecciones, default="Tramo de Atención Especial")
                 
                 res_table['V. Flujo (m/s)'] = round(v_real, 3)
-                res_table['V. Mínima Barrido (m/s)'] = np.where(res_table['S_sim'] > 0, round(res_table['v_critica'], 3), 0.000)
-                res_table['Pendiente Tramo (S)'] = round(res_table['S_sim'].fillna(0), 4)
+                res_table['V. Mínima Barrido (m/s)'] = np.where(res_table['S'] > 0, round(res_table['v_critica'], 3), 0.000)
+                res_table['Pendiente Local (S)'] = round(res_table['S'].fillna(0), 4)
                 
-                output_cols = [col_x, 'z_simplificada', 'Pendiente Tramo (S)', 'Diagnóstico Técnico', 'V. Flujo (m/s)', 'V. Mínima Barrido (m/s)']
+                output_cols = [col_x, 'z_diseño', 'Pendiente Local (S)', 'Diagnóstico Técnico', 'V. Flujo (m/s)', 'V. Mínima Barrido (m/s)']
                 st.dataframe(
-                    res_table[output_cols].rename(columns={col_x: "Distancia (m)", 'z_simplificada': "Elevación (m)"}), 
+                    res_table[output_cols].rename(columns={col_x: "Distancia (m)", 'z_diseño': "Elevación (m)"}), 
                     use_container_width=True
                 )
                 
