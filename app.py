@@ -58,7 +58,6 @@ st.markdown("""
 # 2. BARRA LATERAL (SIDEBAR) - Estructura Visual
 st.sidebar.title("Analizador Hidráulico y de Protección de Conductos")
 
-# Inicializamos una clave en el estado de la sesión si no existe para controlar el refresco limpio
 if "uploader_key" not in st.session_state:
     st.session_state["uploader_key"] = "file_uploader_v1"
 
@@ -69,7 +68,6 @@ uploaded_file = st.sidebar.file_uploader(
     key=st.session_state["uploader_key"]
 )
 
-# LÓGICA DE INTERFAZ CONTROLADA POR PYTHON:
 if uploaded_file is not None:
     st.markdown("<div class='file-uploaded-active'></div>", unsafe_allow_html=True)
     if st.sidebar.button("🔄 Carga un archivo diferente", use_container_width=True):
@@ -78,11 +76,11 @@ if uploaded_file is not None:
 
 st.sidebar.markdown("---")
 
-# B. Parámetros Hidráulicos Estacionarios (Inputs globales)
+# B. Parámetros Hidráulicos Estacionarios
 q_input = st.sidebar.text_input("Caudal de Diseño Q (m³/s)", value="0.075")
 d_input = st.sidebar.text_input("Diámetro Interno D (m)", value="0.305")
 
-# Inicialización segura global antes de procesar entradas para evitar NameError
+# Inicialización segura global
 q_m3s = 0.075
 d_m = 0.305
 dh_d = 9.0
@@ -142,18 +140,14 @@ if uploaded_file:
             g = 9.81
             
             if d_m < 0.100:
-                st.warning("⚠️ **Nota técnica:** Diámetro menor a 100 mm. Los efectos capilares y de tensión superficial pueden dferir de los modelos cinemáticos de arrastre clásicos.")
+                st.warning("⚠️ **Nota técnica:** Diámetro menor a 100 mm. Los efectos capilares y de tensión superficial pueden diferir de los modelos cinemáticos de arrastre clásicos.")
 
             # ---- MOTOR DE CÁLCULO 1: HIDRÁULICA Y AIRE (II-UNAM / KALINSKE) ----
             pga_sistema = q_m3s / np.sqrt(g * (d_m**5)) if d_m > 0 else 0
             
-            # Identificación de Crestas (Puntos Altos) y Valles (Puntos Bajos) para análisis macro
+            # Identificación inicial de micro-crestas y valles
             df['es_cresta'] = (df[col_z] > df[col_z].shift(1)) & (df[col_z] > df[col_z].shift(-1))
             df['es_valle'] = (df[col_z] < df[col_z].shift(1)) & (df[col_z] < df[col_z].shift(-1))
-            
-            # Forzar extremos del perfil como hitos de control geométrico inicial/final
-            df.loc[df.index[0], 'es_cresta'] = True
-            df.loc[df.index[-1], 'es_valle'] = True
             
             df['dx'] = df[col_x].diff()
             df['dz'] = df[col_z].diff()
@@ -165,41 +159,68 @@ if uploaded_file:
             area = np.pi * (d_m**2) / 4 if d_m > 0 else 1
             v_real = q_m3s / area
 
-            # ---- MOTOR DE CÁLCULO 2: ANÁLISIS MACROSCÓPICO SUAVIZADO (WANG ET AL., 2023) ----
+            # ---- MOTOR DE CÁLCULO 2: FILTRADO Y SUAVIZADO MACRO REAL ----
             df['critico_pendiente_larga'] = False
             
             if activar_anticolapso:
-                # Extraemos únicamente los nodos de quiebre macro (Crestas y Valles) para limpiar el ruido topográfico
-                df_macro = df[df['es_cresta'] | df['es_valle']].copy()
-                df_macro = df_macro.sort_values(by=col_x).reset_index()
+                # Filtrado por umbral (Tolerancia vertical de 2 metros para eliminar ruido topográfico)
+                UMBRAL_RUIDO = 2.0
+                macro_nodos = []
                 
-                # Buscamos pendientes largas acumuladas entre estos macro-nodos
+                # Siempre agregamos el primer nodo del perfil
+                macro_nodos.append({'index': 0, 'x': df.loc[0, col_x], 'z': df.loc[0, col_z], 'tipo': 'inicio'})
+                
+                ultimo_z = df.loc[0, col_z]
+                
+                # Recorremos el perfil buscando cambios verdaderos mayores al umbral
+                for i in range(1, len(df)):
+                    z_act = df.loc[i, col_z]
+                    if abs(z_act - ultimo_z) >= UMBRAL_RUIDO:
+                        tipo_nodo = 'cresta' if z_act > ultimo_z else 'valle'
+                        macro_nodos.append({'index': i, 'x': df.loc[i, col_x], 'z': z_act, 'tipo': tipo_nodo})
+                        ultimo_z = z_act
+                
+                # Siempre agregamos el último nodo si no está incluido
+                if macro_nodos[-1]['index'] != len(df) - 1:
+                    macro_nodos.append({'index': len(df) - 1, 'x': df.iloc[-1][col_x], 'z': df.iloc[-1][col_z], 'tipo': 'fin'})
+                
+                # Convertimos los macro-nodos filtrados a DataFrame para el análisis de pendientes largas
+                df_macro = pd.DataFrame(macro_nodos)
+                
+                # Actualizamos las banderas del df original basados en los macro nodos reales filtrados
+                df['es_cresta'] = False
+                df['es_valle'] = False
+                for idx, row in df_macro.iterrows():
+                    if row['tipo'] == 'cresta':
+                        df.loc[int(row['index']), 'es_cresta'] = True
+                    elif row['tipo'] == 'valle':
+                        df.loc[int(row['index']), 'es_valle'] = True
+
+                # Buscamos tramos verdaderamente largos entre los macro-nodos filtrados
                 for idx in range(len(df_macro) - 1):
                     nodo_a = df_macro.loc[idx]
                     nodo_b = df_macro.loc[idx+1]
                     
-                    z_alta = max(nodo_a[col_z], nodo_b[col_z])
-                    z_baja = min(nodo_a[col_z], nodo_b[col_z])
-                    diff_macro_vertical = z_alta - z_baja
+                    diff_macro_vertical = abs(nodo_a['z'] - nodo_b['z'])
                     
-                    # Si la diferencia macro neta supera la tolerancia de vacío, se requiere válvula intermedia
+                    # Si la caída o subida neta acumulada supera el límite crítico de vacío
                     if diff_macro_vertical > limite_critico_vertical:
                         num_valvulas_necesarias = int(diff_macro_vertical // limite_critico_vertical)
                         
                         idx_perfil_inicio = int(nodo_a['index'])
                         idx_perfil_fin = int(nodo_b['index'])
                         
+                        # Colocamos las válvulas de manera equidistante a lo largo de la macro-pendiente
                         for nv in range(1, num_valvulas_necesarias + 1):
                             fraccion = nv / (num_valvulas_necesarias + 1)
-                            z_objetivo = nodo_a[col_z] + fraccion * (nodo_b[col_z] - nodo_a[col_z])
+                            z_objetivo = nodo_a['z'] + fraccion * (nodo_b['z'] - nodo_a['z'])
                             
                             rango_tramo = df.iloc[idx_perfil_inicio:idx_perfil_fin+1]
                             if not rango_tramo.empty:
                                 idx_cercano = (rango_tramo[col_z] - z_objetivo).abs().idxmin()
                                 df.loc[idx_cercano, 'critico_pendiente_larga'] = True
 
-            # 4. COMPONENTE GRÁFICO AVANZADO
-            st.subheader("Perfil Longitudinal del Acueducto e Hitos de Control")
+            # 4. COMPONENTE GRÁFICO (Sin el título de sección anterior)
             fig = go.Figure()
 
             # Trazado del perfil real del terreno/tubería
@@ -210,8 +231,8 @@ if uploaded_file:
                 line=dict(color='#1E40AF', width=2.5)
             ))
 
-            # Hito 1: Puntos Altos Geométricos
-            crestas = df[df['es_cresta'] & (df.index != df.index[0]) & (df.index != df.index[-1])]
+            # Hito 1: Puntos Altos Geométricos Filtrados
+            crestas = df[df['es_cresta']]
             if not crestas.empty:
                 fig.add_trace(go.Scatter(
                     x=crestas[col_x], y=crestas[col_z], 
@@ -232,7 +253,7 @@ if uploaded_file:
                         showlegend=(i == df['riesgo_hidraulico'].idxmax())
                     ))
 
-            # Hito 3: Puntos de colapso potencial en pendientes largas (Solo si está activo)
+            # Hito 3: Puntos de colapso potencial en pendientes largas simplificadas
             if activar_anticolapso:
                 p_largas = df[df['critico_pendiente_larga']]
                 fig.add_trace(go.Scatter(
@@ -247,7 +268,7 @@ if uploaded_file:
                 xaxis_title="Distancia / Cadenamiento (m)", 
                 yaxis_title="Elevación (m)", 
                 height=550,
-                margin=dict(l=10, r=10, t=20, b=10),
+                margin=dict(l=10, r=10, t=10, b=10),
                 legend=dict(orientation="h", yanchor="top", y=-0.18, xanchor="center", x=0.5),
                 hovermode="x unified"
             )
@@ -256,7 +277,7 @@ if uploaded_file:
             # 5. MATRIZ DE RESULTADOS / REPORTES COMBINADOS
             st.subheader("Reporte General de Nodos Críticos Detectados")
             
-            res_table = df[(df['es_cresta'] & (df.index != df.index[0])) | (df['riesgo_hidraulico']) | (df['critico_pendiente_larga'])].copy()
+            res_table = df[(df['es_cresta']) | (df['riesgo_hidraulico']) | (df['critico_pendiente_larga'])].copy()
             
             if not res_table.empty:
                 condiciones = [
