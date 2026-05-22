@@ -51,17 +51,21 @@ st.sidebar.title("Analizador de Aire Atrapado en Conductos a Presión")
 uploaded_file = st.sidebar.file_uploader("Carga tu perfil en Excel o CSV", type=["xlsx", "csv"])
 
 # LÓGICA DE INTERFAZ CORREGIDA:
-# Si el archivo YA está cargado, aplicamos CSS únicamente al botón inferior del dropzone (el del signo +)
+# Si el archivo YA está cargado, aplicamos el CSS dinámico de ocultamiento y sustitución
 if uploaded_file is not None:
     st.markdown("""
         <style>
-        /* Oculta la metadata nativa inferior (tamaño del archivo y botón de eliminar) */
+        /* 1. ELIMINAR COMPLETAMENTE LA SECCIÓN DEL NOMBRE DEL ARCHIVO CON EL ICONO (ENCERRADO EN ROJO) */
+        [data-testid="stFileUploaderDropzone"] div[data-testid="stHorizontalBlock"] {
+            display: none !important;
+        }
+        
+        /* 2. Ocultar la metadata nativa inferior residual (tamaño del archivo y botón de eliminar viejo) */
         [data-testid="stFileUploaderDropzone"] + div {
             display: none !important;
         }
         
-        /* Modifica ESPECÍFICAMENTE el botón del signo (+) para que diga "Carga un archivo diferente" */
-        [data-testid="stFileUploaderDropzone"] button [data-testid="stMarkdownContainer"] p,
+        /* 3. Modificar el botón del signo (+) para que diga "Carga un archivo diferente" */
         [data-testid="stFileUploaderDropzone"] button::before {
             content: "Carga un archivo diferente";
             font-size: 13px;
@@ -69,19 +73,19 @@ if uploaded_file is not None:
             font-weight: 600;
         }
         
-        /* Oculta el icono '+' de ese botón */
+        /* Ocultar el icono '+' original del botón secundario */
         [data-testid="stFileUploaderDropzone"] button svg {
             display: none !important; 
         }
         
-        /* Estiliza el botón inferior para que abarque todo el ancho de forma limpia */
+        /* Forzar diseño limpio y estilizado para el botón de re-carga alternativo */
         [data-testid="stFileUploaderDropzone"] button {
             width: 100% !important;
             background-color: #f0f4f8 !important;
             border: 1px dashed #1E40AF !important;
             padding: 6px 12px !important;
             height: auto !important;
-            margin-top: 4px !important;
+            margin-top: 2px !important;
         }
         </style>
     """, unsafe_allow_html=True)
