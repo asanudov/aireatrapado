@@ -78,18 +78,28 @@ if uploaded_file is not None:
 
 st.sidebar.markdown("---")
 
-# B. Parámetros Hidráulicos Estacionarios
+# B. Parámetros Hidráulicos Estacionarios (Inputs globales)
 q_input = st.sidebar.text_input("Caudal de Diseño Q (m³/s)", value="0.075")
 d_input = st.sidebar.text_input("Diámetro Interno D (m)", value="0.305")
 
+# Inicialización segura global antes de procesar entradas para evitar NameError
+q_m3s = 0.075
+d_m = 0.305
+dh_d = 9.0
+h_res = 0.0
+
+try:
+    q_m3s = float(q_input) if q_input else 0.075
+    d_m = float(d_input) if d_input else 0.305
+except ValueError:
+    st.sidebar.error("Por favor, introduce valores numéricos válidos para Q y D.")
+
 st.sidebar.markdown("---")
 
-# C. NUEVA SECCIÓN ADAPTADA: ANÁLISIS DE VÁLVULAS INTERMEDIAS ANTICOLAPSO
+# C. SECCIÓN: ANÁLISIS DE VÁLVULAS INTERMEDIAS ANTICOLAPSO
 st.sidebar.markdown("**Análisis de válvulas intermedias anticolapso**")
 activar_anticolapso = st.sidebar.checkbox("Activar análisis anticolapso", value=True)
 
-dh_d = 9.0
-h_res = 0.0
 if activar_anticolapso:
     dh_d_input = st.sidebar.text_input("Límite de Vacío Admisible ΔH_D (m)", value="9.0")
     h_res_input = st.sidebar.text_input("Presión Residual Post-Rotura h (m)", value="0.0")
@@ -132,7 +142,7 @@ if uploaded_file:
             g = 9.81
             
             if d_m < 0.100:
-                st.warning("⚠️ **Nota técnica:** Diámetro menor a 100 mm. Los efectos capilares y de tensión superficial pueden diferir de los modelos cinemáticos de arrastre clásicos.")
+                st.warning("⚠️ **Nota técnica:** Diámetro menor a 100 mm. Los efectos capilares y de tensión superficial pueden dferir de los modelos cinemáticos de arrastre clásicos.")
 
             # ---- MOTOR DE CÁLCULO 1: HIDRÁULICA Y AIRE (II-UNAM / KALINSKE) ----
             pga_sistema = q_m3s / np.sqrt(g * (d_m**5)) if d_m > 0 else 0
@@ -174,10 +184,8 @@ if uploaded_file:
                     
                     # Si la diferencia macro neta supera la tolerancia de vacío, se requiere válvula intermedia
                     if diff_macro_vertical > limite_critico_vertical:
-                        # Calculamos cuántas válvulas intermedias se necesitan en esa pendiente larga
                         num_valvulas_necesarias = int(diff_macro_vertical // limite_critico_vertical)
                         
-                        # Interpolamos la posición exacta en el perfil original para colocar la válvula de forma equidistante
                         idx_perfil_inicio = int(nodo_a['index'])
                         idx_perfil_fin = int(nodo_b['index'])
                         
@@ -185,7 +193,6 @@ if uploaded_file:
                             fraccion = nv / (num_valvulas_necesarias + 1)
                             z_objetivo = nodo_a[col_z] + fraccion * (nodo_b[col_z] - nodo_a[col_z])
                             
-                            # Encontramos el índice en el df original que más se aproxime a esa elevación calculada
                             rango_tramo = df.iloc[idx_perfil_inicio:idx_perfil_fin+1]
                             if not rango_tramo.empty:
                                 idx_cercano = (rango_tramo[col_z] - z_objetivo).abs().idxmin()
@@ -213,7 +220,7 @@ if uploaded_file:
                     name='Punto Alto Geométrico (Bolsa por Flotación)'
                 ))
 
-            # Hito 2: Tramos Críticos por Arrastre Insuficiente (UNAM/Kalinske) en Rojo grueso
+            # Hito 2: Tramos Críticos por Arrastre Insuficiente (UNAM/Kalinske)
             for i in range(1, len(df)):
                 if df.loc[i, 'riesgo_hidraulico']:
                     fig.add_trace(go.Scatter(
@@ -249,11 +256,9 @@ if uploaded_file:
             # 5. MATRIZ DE RESULTADOS / REPORTES COMBINADOS
             st.subheader("Reporte General de Nodos Críticos Detectados")
             
-            # Filtramos filas para el reporte final
             res_table = df[(df['es_cresta'] & (df.index != df.index[0])) | (df['riesgo_hidraulico']) | (df['critico_pendiente_larga'])].copy()
             
             if not res_table.empty:
-                # Clasificación analítica exacta del diagnóstico
                 condiciones = [
                     res_table['critico_pendiente_larga'],
                     res_table['es_cresta'],
