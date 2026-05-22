@@ -4,7 +4,7 @@ import numpy as np
 import plotly.graph_objects as go
 
 # 1. CONFIGURACIÓN DE PÁGINA Y ESTILOS BASE
-st.set_page_config(page_title="Analizador de Aire Atrapado y Transitorios", layout="wide")
+st.set_page_config(page_title="Analizador de Aire Atrapado", layout="wide")
 
 # CSS personalizado: Máxima amplitud horizontal y optimización vertical agresiva del sidebar
 st.markdown("""
@@ -43,6 +43,7 @@ st.markdown("""
     }
 
     /* ---- OCULTAR TODO EL CONTENEDOR INTERNO DE ARCHIVOS DE STREAMLIT ---- */
+    /* Cuando ya hay un archivo subido, borramos absolutamente todo el bloque interno redundante */
     .file-uploaded-active [data-testid="stFileUploaderDropzone"] div {
         display: none !important;
     }
@@ -56,8 +57,9 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # 2. BARRA LATERAL (SIDEBAR) - Estructura Visual
-st.sidebar.title("Analizador Hidráulico y de Protección de Conductos")
+st.sidebar.title("Analizador de Aire Atrapado en Conductos a Presión")
 
+# Inicializamos una clave en el estado de la sesión si no existe para controlar el refresco limpio
 if "uploader_key" not in st.session_state:
     st.session_state["uploader_key"] = "file_uploader_v1"
 
@@ -68,62 +70,48 @@ uploaded_file = st.sidebar.file_uploader(
     key=st.session_state["uploader_key"]
 )
 
+# LÓGICA DE INTERFAZ 100% CONTROLADA POR PYTHON:
 if uploaded_file is not None:
+    # Agregamos una clase contenedora ficticia mediante HTML inyectado para activar las reglas CSS drásticas
     st.markdown("<div class='file-uploaded-active'></div>", unsafe_allow_html=True)
+    
+    # Creamos un botón nativo estilizado en la barra lateral justo abajo para reiniciar el análisis
     if st.sidebar.button("🔄 Carga un archivo diferente", use_container_width=True):
+        # Al hacer clic, cambiamos la clave del componente para destruir el estado interno de Streamlit por completo
         st.session_state["uploader_key"] = f"file_uploader_{np.random.randint(1000, 9999)}"
         st.rerun()
 
 st.sidebar.markdown("---")
 
-# B. Parámetros Hidráulicos Estacionarios
-q_input = st.sidebar.text_input("Caudal de Diseño Q (m³/s)", value="0.075")
-d_input = st.sidebar.text_input("Diámetro Interno D (m)", value="0.305")
+# B. Entradas numéricas abajo de la carga (Campos de texto limpios sin botones + / -)
+q_input = st.sidebar.text_input("Caudal (m³/s)", value="0.075")
+d_input = st.sidebar.text_input("Diámetro Interno (m)", value="0.305")
 
-# Inicialización segura global
-q_m3s = 0.075
-d_m = 0.305
-dh_d = 9.0
-h_res = 0.0
-
+# Conversión segura de cadenas a flotantes para evitar quiebres en ejecución
 try:
-    q_m3s = float(q_input) if q_input else 0.075
-    d_m = float(d_input) if d_input else 0.305
+    q_m3s = float(q_input) if q_input else 0.000
+    d_m = float(d_input) if d_input else 0.010
 except ValueError:
-    st.sidebar.error("Por favor, introduce valores numéricos válidos para Q y D.")
+    st.sidebar.error("Por favor, introduce valores numéricos válidos para Caudal y Diámetro.")
+    q_m3s, d_m = 0.075, 0.305
 
 st.sidebar.markdown("---")
 
-# C. SECCIÓN: ANÁLISIS DE VÁLVULAS INTERMEDIAS ANTICOLAPSO
-st.sidebar.markdown("**Análisis de válvulas intermedias anticolapso**")
-activar_anticolapso = st.sidebar.checkbox("Activar análisis anticolapso", value=True)
-
-if activar_anticolapso:
-    dh_d_input = st.sidebar.text_input("Límite de Vacío Admisible ΔH_D (m)", value="9.0")
-    h_res_input = st.sidebar.text_input("Presión Residual Post-Rotura h (m)", value="0.0")
-    try:
-        dh_d = float(dh_d_input) if dh_d_input else 9.0
-        h_res = float(h_res_input) if h_res_input else 0.0
-    except ValueError:
-        st.sidebar.error("Valores numéricos inválidos para el análisis anticolapso.")
-
-limite_critico_vertical = dh_d + h_res
-
-st.sidebar.markdown("---")
-
-# D. Instrucciones de formato para el archivo
+# C. Instrucciones de formato para el archivo
 st.sidebar.info("""
 **Instrucciones de formato del archivo:**
-1. Debe contener dos columnas (X, Y) con encabezados claros.
-2. Eje X: "Cadenamiento", "Distancia" o "X" (m).
-3. Eje Y: "Elevación", "Elevacion" o "Y" (m).
+1. Debe contener dos columnas.
+2. Cada una con un encabezado.
+3. Para la primera columna, el encabezado debe decir "Cadenamiento", "Distancia" o "X".
+4. Para la segunda columna, debe decir "Elevación" o "Y".
+5. Los números deben ser metros.
 """)
 
 st.sidebar.markdown("---")
 st.sidebar.write("**Desarrollado por: M.I. Alan Sañudo**")
 
 # 3. CUERPO PRINCIPAL DE LA APLICACIÓN
-st.title("Analizador de Aire Atrapado y Criterios de Protección Anticolapso")
+st.title("Analizador de Aire Atrapado en Conductos a Presión")
 
 if uploaded_file:
     try:
@@ -132,98 +120,50 @@ if uploaded_file:
         else:
             df = pd.read_excel(uploaded_file)
         
+        # Normalización estricta de nombres de columnas
         df.columns = [c.lower().strip() for c in df.columns]
+        
+        # Mapeo por prioridades de los encabezados válidos
         col_x = next((c for c in df.columns if c in ['cadenamiento', 'distancia', 'x']), None)
         col_z = next((c for c in df.columns if c in ['elevación', 'elevacion', 'y']), None)
 
         if col_x and col_z:
             g = 9.81
             
+            # Alerta preventiva por criterios de capilaridad (Zukoski)
             if d_m < 0.100:
-                st.warning("⚠️ **Nota técnica:** Diámetro menor a 100 mm. Los efectos capilares y de tensión superficial pueden diferir de los modelos cinemáticos de arrastre clásicos.")
+                st.warning("⚠️ **Nota técnica:** El diámetro ingresado es menor a 100 mm (4 pulgadas). En tuberías pequeñas, los efectos de tensión superficial y capilaridad pueden alterar el comportamiento del aire respecto al modelo matemático de arrastre hidráulico por gravedad.")
 
-            # ---- MOTOR DE CÁLCULO 1: HIDRÁULICA Y AIRE (II-UNAM / KALINSKE) ----
+            # ---- MOTOR DE CÁLCULO: METODOLOGÍA MANUAL II-UNAM ----
+            # 1. Gasto Adimensional (PGA) del flujo constante del sistema
             pga_sistema = q_m3s / np.sqrt(g * (d_m**5)) if d_m > 0 else 0
             
-            # Identificación inicial de micro-crestas y valles
+            # 2. Análisis geométrico de picos (Crestas locales de acumulación por flotación)
             df['es_cresta'] = (df[col_z] > df[col_z].shift(1)) & (df[col_z] > df[col_z].shift(-1))
-            df['es_valle'] = (df[col_z] < df[col_z].shift(1)) & (df[col_z] < df[col_z].shift(-1))
             
+            # 3. Análisis cinemático de diferenciales por tramo
             df['dx'] = df[col_x].diff()
             df['dz'] = df[col_z].diff()
+            
+            # Pendiente geométrica S (Definida positiva para tramos descendentes en el manual de la UNAM)
             df['S'] = -df['dz'] / df['dx'].replace(0, np.nan)
             
+            # 4. Evaluación de la Capacidad de Arrastre (Condición Crítica: Tramo descendente y PGA insuficiente)
             df['riesgo_hidraulico'] = (df['S'] > 0) & (pga_sistema < np.sqrt(df['S'].fillna(0)))
-            df['v_critica'] = 1.146 * np.sqrt(g * d_m * df['S']).fillna(0)
             
+            # Velocidad Crítica límite para el reporte (Ecuación analítica de Kalinske y Bliss)
+            df['v_critica'] = 1.146 * np.sqrt(g * d_m * df['S'])
+            df['v_critica'] = df['v_critica'].fillna(0)
+            
+            # Velocidad cinemática real en el conducto
             area = np.pi * (d_m**2) / 4 if d_m > 0 else 1
             v_real = q_m3s / area
 
-            # ---- MOTOR DE CÁLCULO 2: FILTRADO Y SUAVIZADO MACRO REAL ----
-            df['critico_pendiente_larga'] = False
-            
-            if activar_anticolapso:
-                # Filtrado por umbral (Tolerancia vertical de 2 metros para eliminar ruido topográfico)
-                UMBRAL_RUIDO = 2.0
-                macro_nodos = []
-                
-                # Siempre agregamos el primer nodo del perfil
-                macro_nodos.append({'index': 0, 'x': df.loc[0, col_x], 'z': df.loc[0, col_z], 'tipo': 'inicio'})
-                
-                ultimo_z = df.loc[0, col_z]
-                
-                # Recorremos el perfil buscando cambios verdaderos mayores al umbral
-                for i in range(1, len(df)):
-                    z_act = df.loc[i, col_z]
-                    if abs(z_act - ultimo_z) >= UMBRAL_RUIDO:
-                        tipo_nodo = 'cresta' if z_act > ultimo_z else 'valle'
-                        macro_nodos.append({'index': i, 'x': df.loc[i, col_x], 'z': z_act, 'tipo': tipo_nodo})
-                        ultimo_z = z_act
-                
-                # Siempre agregamos el último nodo si no está incluido
-                if macro_nodos[-1]['index'] != len(df) - 1:
-                    macro_nodos.append({'index': len(df) - 1, 'x': df.iloc[-1][col_x], 'z': df.iloc[-1][col_z], 'tipo': 'fin'})
-                
-                # Convertimos los macro-nodos filtrados a DataFrame para el análisis de pendientes largas
-                df_macro = pd.DataFrame(macro_nodos)
-                
-                # Actualizamos las banderas del df original basados en los macro nodos reales filtrados
-                df['es_cresta'] = False
-                df['es_valle'] = False
-                for idx, row in df_macro.iterrows():
-                    if row['tipo'] == 'cresta':
-                        df.loc[int(row['index']), 'es_cresta'] = True
-                    elif row['tipo'] == 'valle':
-                        df.loc[int(row['index']), 'es_valle'] = True
-
-                # Buscamos tramos verdaderamente largos entre los macro-nodos filtrados
-                for idx in range(len(df_macro) - 1):
-                    nodo_a = df_macro.loc[idx]
-                    nodo_b = df_macro.loc[idx+1]
-                    
-                    diff_macro_vertical = abs(nodo_a['z'] - nodo_b['z'])
-                    
-                    # Si la caída o subida neta acumulada supera el límite crítico de vacío
-                    if diff_macro_vertical > limite_critico_vertical:
-                        num_valvulas_necesarias = int(diff_macro_vertical // limite_critico_vertical)
-                        
-                        idx_perfil_inicio = int(nodo_a['index'])
-                        idx_perfil_fin = int(nodo_b['index'])
-                        
-                        # Colocamos las válvulas de manera equidistante a lo largo de la macro-pendiente
-                        for nv in range(1, num_valvulas_necesarias + 1):
-                            fraccion = nv / (num_valvulas_necesarias + 1)
-                            z_objetivo = nodo_a['z'] + fraccion * (nodo_b['z'] - nodo_a['z'])
-                            
-                            rango_tramo = df.iloc[idx_perfil_inicio:idx_perfil_fin+1]
-                            if not rango_tramo.empty:
-                                idx_cercano = (rango_tramo[col_z] - z_objetivo).abs().idxmin()
-                                df.loc[idx_cercano, 'critico_pendiente_larga'] = True
-
-            # 4. COMPONENTE GRÁFICO (Sin el título de sección anterior)
+            # 4. COMPONENTE GRÁFICO (MÁXIMA AMPLITUD HORIZONTAL)
+            st.subheader("Perfil Longitudinal del Acueducto")
             fig = go.Figure()
 
-            # Trazado del perfil real del terreno/tubería
+            # Trazado base de la tubería
             fig.add_trace(go.Scatter(
                 x=df[col_x], y=df[col_z], 
                 mode='lines', 
@@ -231,17 +171,16 @@ if uploaded_file:
                 line=dict(color='#1E40AF', width=2.5)
             ))
 
-            # Hito 1: Puntos Altos Geométricos Filtrados
+            # Marcadores geométricos de Puntos Altos (Simbología exacta solicitada)
             crestas = df[df['es_cresta']]
-            if not crestas.empty:
-                fig.add_trace(go.Scatter(
-                    x=crestas[col_x], y=crestas[col_z], 
-                    mode='markers', 
-                    marker=dict(color='#F59E0B', size=11, symbol='triangle-up', line=dict(color='black', width=1)),
-                    name='Punto Alto Geométrico (Bolsa por Flotación)'
-                ))
+            fig.add_trace(go.Scatter(
+                x=crestas[col_x], y=crestas[col_z], 
+                mode='markers', 
+                marker=dict(color='#F59E0B', size=12, symbol='triangle-up', line=dict(color='black', width=1)),
+                name='Punto alto, acumulación por flotación'
+            ))
 
-            # Hito 2: Tramos Críticos por Arrastre Insuficiente (UNAM/Kalinske)
+            # Resaltar en rojo grueso para los tramos con arrastre insuficiente
             for i in range(1, len(df)):
                 if df.loc[i, 'riesgo_hidraulico']:
                     fig.add_trace(go.Scatter(
@@ -249,84 +188,64 @@ if uploaded_file:
                         y=[df.loc[i-1, col_z], df.loc[i, col_z]],
                         mode='lines', 
                         line=dict(color='#DC2626', width=4.5),
-                        name='Tramo Crítico: Arrastre de Aire Insuficiente' if i == df['riesgo_hidraulico'].idxmax() else "",
+                        name='Tramo Crítico: Arrastre Insuficiente' if i == df['riesgo_hidraulico'].idxmax() else "",
                         showlegend=(i == df['riesgo_hidraulico'].idxmax())
                     ))
 
-            # Hito 3: Puntos de colapso potencial en pendientes largas simplificadas
-            if activar_anticolapso:
-                p_largas = df[df['critico_pendiente_larga']]
-                fig.add_trace(go.Scatter(
-                    x=p_largas[col_x], y=p_largas[col_z], 
-                    mode='markers', 
-                    marker=dict(color='#D946EF', size=11, symbol='square', line=dict(color='black', width=1)),
-                    name='Válvula Intermedia Propuesta (Macro-Suavizado Anticolapso)'
-                ))
-
-            # Ajustes de Layout e Inversión de Leyendas al eje inferior
+            # Layout optimizado: Forzado de leyendas al eje inferior (y=-0.18) para liberar la horizontal
             fig.update_layout(
-                xaxis_title="Distancia / Cadenamiento (m)", 
+                xaxis_title="Distancia (m)", 
                 yaxis_title="Elevación (m)", 
                 height=550,
-                margin=dict(l=10, r=10, t=10, b=10),
-                legend=dict(orientation="h", yanchor="top", y=-0.18, xanchor="center", x=0.5),
+                margin=dict(l=10, r=10, t=20, b=10),
+                legend=dict(
+                    orientation="h",
+                    yanchor="top",
+                    y=-0.18, 
+                    xanchor="center",
+                    x=0.5
+                ),
                 hovermode="x unified"
             )
             st.plotly_chart(fig, use_container_width=True)
 
-            # 5. MATRIZ DE RESULTADOS / REPORTES COMBINADOS
-            st.subheader("Reporte General de Nodos Críticos Detectados")
-            
-            res_table = df[(df['es_cresta']) | (df['riesgo_hidraulico']) | (df['critico_pendiente_larga'])].copy()
+            # 5. MATRIZ DE RESULTADOS / REPORTES
+            st.subheader("Reporte General de Puntos Críticos")
+            res_table = df[(df['es_cresta']) | (df['riesgo_hidraulico'])].copy()
             
             if not res_table.empty:
-                condiciones = [
-                    res_table['critico_pendiente_larga'],
-                    res_table['es_cresta'],
-                    res_table['riesgo_hidraulico']
-                ]
-                elecciones = [
-                    "Válvula Intermedia Sugerida (Pendiente Larga Macroscópica)",
-                    "Punto Alto Geométrico (Bolsa Permanente)",
-                    "Aire Estacionario (Velocidad de Flujo Insuficiente)"
-                ]
-                res_table['Diagnóstico Técnico'] = np.select(condiciones, elecciones, default="Tramo de Atención Especial")
-                
+                res_table['Diagnóstico del Aire'] = np.where(
+                    res_table['es_cresta'], 
+                    "Punto Alto Geométrico (Bolsa Permanente)", 
+                    "Aire Estacionario (Falta de Arrastre en Pendiente)"
+                )
                 res_table['V. Flujo (m/s)'] = round(v_real, 3)
-                res_table['V. Mínima Barrido (m/s)'] = np.where(res_table['S'] > 0, round(res_table['v_critica'], 3), 0.000)
-                res_table['Pendiente (S)'] = round(res_table['S'].fillna(0), 4)
+                res_table['V. Mínima Barrido (m/s)'] = round(res_table['v_critica'], 3)
+                res_table['Pendiente (S)'] = round(res_table['S'], 4)
                 
-                output_cols = [col_x, col_z, 'Pendiente (S)', 'Diagnóstico Técnico', 'V. Flujo (m/s)', 'V. Mínima Barrido (m/s)']
+                output_cols = [col_x, col_z, 'Pendiente (S)', 'Diagnóstico del Aire', 'V. Flujo (m/s)', 'V. Mínima Barrido (m/s)']
                 st.dataframe(
                     res_table[output_cols].rename(columns={col_x: "Distancia (m)", col_z: "Elevación (m)"}), 
                     use_container_width=True
                 )
                 
-                # Indicadores técnicos métricos de control de diseño
-                c1, c2 = st.columns(2)
-                with c1:
-                    st.metric(label="Parámetro de Gasto Adimensional (PGA) Actual", value=f"{pga_sistema:.4f}")
-                with c2:
-                    if activar_anticolapso:
-                        st.metric(label="Límite Vertical Macro Permitido (ΔH_D + h)", value=f"{limite_critico_vertical:.2f} m")
-                    else:
-                        st.metric(label="Análisis Anticolapso", value="Desactivado")
+                st.metric(label="Parámetro de Gasto Adimensional (PGA) del Sistema", value=f"{pga_sistema:.4f}")
             else:
-                st.success("✅ El sistema opera dentro de rangos óptimos. No se detectaron fallos cinemáticos ni riesgos estructurales.")
+                st.success("✅ El sistema opera con estabilidad. No se detectaron puntos altos ni tramos con insuficiencia de arrastre.")
 
         else:
-            st.error("❌ Formato inválido. Asegúrate de verificar los encabezados de las columnas en tu archivo.")
+            st.error("❌ Formato inválido. Asegúrate de que las columnas del archivo sigan estrictamente las instrucciones de la barra lateral.")
     except Exception as e:
-        st.error(f"Error al procesar el archivo: {e}")
+        st.error(f"Error al leer o procesar el archivo cargado: {e}")
 else:
-    st.info("👈 Ingresa tu archivo de perfil (.csv o .xlsx) y configura las variables en el menú lateral para iniciar la evaluación.")
+    st.info("👈 Por favor, ingresa tu archivo de perfil (.csv o .xlsx) y configura las variables en el menú lateral para iniciar el análisis hidráulico.")
 
 # 6. BIBLIOGRAFÍA DE RESPALDO INSTITUCIONAL
 st.markdown("""
 <div class="discreet-note">
-    <strong>Fuentes técnicas e internacionales de referencia:</strong><br>
-    • <strong>Wang, Y., Zhang, J., et al. (2023).</strong> <em>Air valve arrangement criteria for preventing secondary pipe bursts in long-distance gravitational water supply systems.</em> AQUA - Water Infrastructure, Ecosystems and Society, 72(8), 1566.<br>
-    • <strong>Instituto de Ingeniería, UNAM.</strong> <em>Manual de análisis de la problemática del aire atrapado en acueductos, para mejorar su eficiencia.</em> Serie Manuales, México.<br>
-    • <strong>Kalinske, A. A., & Bliss, P. H. (1943).</strong> <em>Removal of air from pipe lines by flowing water.</em> Civil Engineering, 13(10).
+    <strong>Fuentes técnicas e institucionales de referencia:</strong><br>
+    • Instituto de Ingeniería, UNAM. <em>Manual de análisis de la problemática del aire atrapado en acueductos, para mejorar su eficiencia.</em> Serie Manuales, México.<br>
+    • Kalinske, A. A., & Bliss, P. H. (1943). <em>Removal of air from pipe lines by flowing water.</em> Civil Engineering, 13(10).<br>
+    • Zukoski, E. E. (1966). <em>Influence of viscosity, surface tension and inclination on motion of long bubbles in closed tubes.</em> Journal of Fluid Mechanics.
 </div>
 """, unsafe_allow_html=True)
