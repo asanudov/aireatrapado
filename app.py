@@ -50,26 +50,31 @@ st.sidebar.title("Analizador de Aire Atrapado en Conductos a Presión")
 # A. Cargador de archivos en la parte superior
 uploaded_file = st.sidebar.file_uploader("Carga tu perfil en Excel o CSV", type=["xlsx", "csv"])
 
-# LÓGICA DE INTERFAZ SOLICITADA:
-# Si el archivo YA está cargado, aplicamos CSS para ocultar el subtexto nativo y transformar el '+' en el botón secundario.
+# LÓGICA DE INTERFAZ CORREGIDA:
+# Si el archivo YA está cargado, aplicamos CSS únicamente al botón inferior del dropzone (el del signo +)
 if uploaded_file is not None:
     st.markdown("""
         <style>
-        /* Oculta la metadata redundante de abajo (tamaño del archivo y botón de eliminar nativo) */
+        /* Oculta la metadata nativa inferior (tamaño del archivo y botón de eliminar) */
         [data-testid="stFileUploaderDropzone"] + div {
             display: none !important;
         }
         
-        /* Modifica el botón inferior (+) para que diga textualmente "Carga un archivo diferente" */
+        /* Modifica ESPECÍFICAMENTE el botón del signo (+) para que diga "Carga un archivo diferente" */
+        [data-testid="stFileUploaderDropzone"] button [data-testid="stMarkdownContainer"] p,
         [data-testid="stFileUploaderDropzone"] button::before {
             content: "Carga un archivo diferente";
             font-size: 13px;
             color: #1E40AF;
             font-weight: 600;
         }
+        
+        /* Oculta el icono '+' de ese botón */
         [data-testid="stFileUploaderDropzone"] button svg {
-            display: none !important; /* Oculta el signo + nativo */
+            display: none !important; 
         }
+        
+        /* Estiliza el botón inferior para que abarque todo el ancho de forma limpia */
         [data-testid="stFileUploaderDropzone"] button {
             width: 100% !important;
             background-color: #f0f4f8 !important;
