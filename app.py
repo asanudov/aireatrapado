@@ -152,11 +152,3 @@ st.markdown("""
     • Escarameia, M. (2000). <em>Air in pressurized water pipelines.</em>
 </div>
 """, unsafe_allow_html=True)
-
-**Principales cambios realizados:**
-1.  **Sidebar:** Se actualizó el título y el nombre del desarrollador con los grados y caracteres correctos.
-2.  **Visualización:** Se usó `margin=dict(l=10, r=10)` y `legend=dict(orientation="h", y=-0.2)` para que el gráfico use el 100% del ancho de la pantalla de forma efectiva, sin que la leyenda le reste espacio lateral.
-3.  **Simbología:** Se renombró el marcador a "Punto alto, acumulación por flotación".
-4.  **UX:** Se redujo el espacio muerto superior (padding) para que el gráfico sea lo primero que se vea al cargar los datos.
-
-¡Tu Web App ya está lista para actualizarse en GitHub!
