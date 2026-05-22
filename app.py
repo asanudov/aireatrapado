@@ -41,54 +41,45 @@ st.markdown("""
         margin-top: 0.3rem !important;
         margin-bottom: 0.3rem !important;
     }
+
+    /* ---- OCULTAR TODO EL CONTENEDOR INTERNO DE ARCHIVOS DE STREAMLIT ---- */
+    /* Cuando ya hay un archivo subido, borramos absolutamente todo el bloque interno redundante */
+    .file-uploaded-active [data-testid="stFileUploaderDropzone"] div {
+        display: none !important;
+    }
+    .file-uploaded-active [data-testid="stFileUploaderDropzone"] + div {
+        display: none !important;
+    }
+    .file-uploaded-active [data-testid="stFileUploaderDropzone"] {
+        display: none !important;
+    }
     </style>
 """, unsafe_allow_html=True)
 
 # 2. BARRA LATERAL (SIDEBAR) - Estructura Visual
 st.sidebar.title("Analizador de Aire Atrapado en Conductos a Presión")
 
-# A. Cargador de archivos en la parte superior
-uploaded_file = st.sidebar.file_uploader("Carga tu perfil en Excel o CSV", type=["xlsx", "csv"])
+# Inicializamos una clave en el estado de la sesión si no existe para controlar el refresco limpio
+if "uploader_key" not in st.session_state:
+    st.session_state["uploader_key"] = "file_uploader_v1"
 
-# LÓGICA DE INTERFAZ CORREGIDA:
-# Si el archivo YA está cargado, aplicamos el CSS dinámico de ocultamiento y sustitución
+# A. Cargador de archivos en la parte superior
+uploaded_file = st.sidebar.file_uploader(
+    "Carga tu perfil en Excel o CSV", 
+    type=["xlsx", "csv"],
+    key=st.session_state["uploader_key"]
+)
+
+# LÓGICA DE INTERFAZ 100% CONTROLADA POR PYTHON:
 if uploaded_file is not None:
-    st.markdown("""
-        <style>
-        /* 1. ELIMINAR COMPLETAMENTE LA SECCIÓN DEL NOMBRE DEL ARCHIVO CON EL ICONO (ENCERRADO EN ROJO) */
-        [data-testid="stFileUploaderDropzone"] div[data-testid="stHorizontalBlock"] {
-            display: none !important;
-        }
-        
-        /* 2. Ocultar la metadata nativa inferior residual (tamaño del archivo y botón de eliminar viejo) */
-        [data-testid="stFileUploaderDropzone"] + div {
-            display: none !important;
-        }
-        
-        /* 3. Modificar el botón del signo (+) para que diga "Carga un archivo diferente" */
-        [data-testid="stFileUploaderDropzone"] button::before {
-            content: "Carga un archivo diferente";
-            font-size: 13px;
-            color: #1E40AF;
-            font-weight: 600;
-        }
-        
-        /* Ocultar el icono '+' original del botón secundario */
-        [data-testid="stFileUploaderDropzone"] button svg {
-            display: none !important; 
-        }
-        
-        /* Forzar diseño limpio y estilizado para el botón de re-carga alternativo */
-        [data-testid="stFileUploaderDropzone"] button {
-            width: 100% !important;
-            background-color: #f0f4f8 !important;
-            border: 1px dashed #1E40AF !important;
-            padding: 6px 12px !important;
-            height: auto !important;
-            margin-top: 2px !important;
-        }
-        </style>
-    """, unsafe_allow_html=True)
+    # Agregamos una clase contenedora ficticia mediante HTML inyectado para activar las reglas CSS drásticas
+    st.markdown("<div class='file-uploaded-active'></div>", unsafe_allow_html=True)
+    
+    # Creamos un botón nativo estilizado en la barra lateral justo abajo para reiniciar el análisis
+    if st.sidebar.button("🔄 Carga un archivo diferente", use_container_width=True):
+        # Al hacer clic, cambiamos la clave del componente para destruir el estado interno de Streamlit por completo
+        st.session_state["uploader_key"] = f"file_uploader_{np.random.randint(1000, 9999)}"
+        st.rerun()
 
 st.sidebar.markdown("---")
 
