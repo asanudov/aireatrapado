@@ -173,10 +173,8 @@ if uploaded_file:
                     nodo_a = df_vertices.loc[idx]
                     nodo_b = df_vertices.loc[idx+1]
                     
-                    # Calculamos la longitud horizontal del tramo simplificado actual
                     longitud_horizontal_tramo = abs(nodo_b[col_x] - nodo_a[col_x])
                     
-                    # CRITERIO DE FILTRADO: Solo evaluar si cumple con la longitud mínima requerida
                     if longitud_horizontal_tramo >= longitud_minima_tramo:
                         diff_vertical_tramo = abs(nodo_a['z_simplificada'] - nodo_b['z_simplificada'])
                         
@@ -195,7 +193,7 @@ if uploaded_file:
                                     idx_cercano = (rango_tramo[col_x] - x_objetivo).abs().idxmin()
                                     df.loc[idx_cercano, 'critico_pendiente_larga'] = True
 
-            # 4. COMPONENTE GRÁFICO AVANZADO EN TRAMOS RECTOS (CON ICONOS REDUCIDOS)
+            # 4. COMPONENTE GRÁFICO AVANZADO EN TRAMOS RECTOS
             fig = go.Figure()
 
             # Perfil Real con ruido (Gris claro)
@@ -236,7 +234,7 @@ if uploaded_file:
                         showlegend=(i == df['riesgo_hidraulico'].idxmax())
                     ))
 
-            # Válvulas Intermedias Anticolapso (¡ICONO CUADRADO REDUCIDO A SIZ=5!)
+            # Válvulas Intermedias Anticolapso (Icono cuadrado muy pequeño)
             if activar_anticolapso:
                 p_largas = df[df['critico_pendiente_larga']]
                 fig.add_trace(go.Scatter(
@@ -256,7 +254,7 @@ if uploaded_file:
             )
             st.plotly_chart(fig, use_container_width=True)
 
-            # 5. MATRIZ DE RESULTADOS / REPORTE GENERAL ENRIQUECIDO
+            # 5. MATRIZ DE RESULTADOS / REPORTE GENERAL
             st.subheader("Reporte General de Nodos Críticos Detectados")
             
             res_table = df[(df['es_cresta']) | (df['riesgo_hidraulico']) | (df['critico_pendiente_larga'])].copy()
@@ -291,4 +289,20 @@ if uploaded_file:
                     if activar_anticolapso:
                         st.metric(label="Límite Vertical Macro Permitido (ΔH_D + h)", value=f"{limite_critico_vertical:.2f} m")
             else:
-                st.success("✅ Estabilidad confirmada
+                st.success("✅ Estabilidad confirmada bajo los parámetros actuales.")
+
+        else:
+            st.error("❌ Columnas del archivo no mapeadas.")
+    except Exception as e:
+        st.error(f"Error en el motor de cálculo: {e}")
+else:
+    st.info("👈 Carga el archivo de perfil para iniciar la simulación.")
+
+# 6. BIBLIOGRAFÍA DE RESPALDO INSTITUCIONAL
+st.markdown("""
+<div class="discreet-note">
+    <strong>Fuentes técnicas e internacionales de referencia:</strong><br>
+    • <strong>Wang, Y., Zhang, J., et al. (2023).</strong> <em>Air valve arrangement criteria for preventing secondary pipe bursts in long-distance gravitational water supply systems.</em> AQUA - IWA Publishing.<br>
+    • <strong>Instituto de Ingeniería, UNAM.</strong> <em>Manual de análisis de la problemática del aire atrapado en acueductos.</em> Serie Manuales, México.
+</div>
+""", unsafe_allow_html=True)
