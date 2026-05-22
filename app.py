@@ -3,42 +3,48 @@ import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 
-# 1. CONFIGURACIÓN DE PÁGINA Y ESTILOS
+# 1. CONFIGURACIÓN DE PÁGINA Y ESTILOS BASE
 st.set_page_config(page_title="Analizador de Aire Atrapado", layout="wide")
 
-# CSS personalizado: Máximo ancho horizontal, ajuste de títulos y personalización del botón de reemplazo (+)
+# CSS base: Máximo ancho horizontal y ajuste de títulos institucionales
 st.markdown("""
     <style>
     .block-container { padding-top: 1.5rem; padding-bottom: 0rem; padding-left: 2rem; padding-right: 2rem; }
     h1 { font-size: 1.8rem !important; font-weight: 700; color: #1E3A8A; }
     .discreet-note { font-size: 11px; color: #888; margin-top: 30px; border-top: 1px solid #eee; padding-top: 10px; }
     [data-testid="stSidebar"] h1 { font-size: 1.2rem !important; line-height: 1.3; }
-    
-    /* Inyección de estilos para sustituir el '+' por 'Carga un archivo diferente' */
-    [data-testid="stFileUploaderDropzone"] button::before {
-        content: "Carga un archivo diferente";
-        font-size: 13px;
-        color: #1E40AF;
-        font-weight: 600;
-    }
-    [data-testid="stFileUploaderDropzone"] button svg {
-        display: none !important; /* Oculta el signo + nativo */
-    }
-    [data-testid="stFileUploaderDropzone"] button {
-        width: 100% !important;
-        background-color: #f0f4f8 !important;
-        border: 1px dashed #1E40AF !important;
-        padding: 6px 12px !important;
-        height: auto !important;
-    }
     </style>
 """, unsafe_allow_html=True)
 
-# 2. BARRA LATERAL (SIDEBAR) - Estructura Visual Solicitada
+# 2. BARRA LATERAL (SIDEBAR) - Estructura Visual
 st.sidebar.title("Analizador de Aire Atrapado en Conductos a Presión")
 
 # A. Cargador de archivos en la parte superior
 uploaded_file = st.sidebar.file_uploader("Carga tu perfil en Excel o CSV", type=["xlsx", "csv"])
+
+# CONDICIONAL DE INTERFAZ: Inyectar CSS de reemplazo SOLO si el archivo ya fue cargado
+if uploaded_file is not None:
+    st.markdown("""
+        <style>
+        /* Modifica el botón de reemplazo (+) únicamente cuando existe un archivo activo */
+        [data-testid="stFileUploaderDropzone"] button::before {
+            content: "Carga un archivo diferente";
+            font-size: 13px;
+            color: #1E40AF;
+            font-weight: 600;
+        }
+        [data-testid="stFileUploaderDropzone"] button svg {
+            display: none !important; /* Oculta el signo + nativo */
+        }
+        [data-testid="stFileUploaderDropzone"] button {
+            width: 100% !important;
+            background-color: #f0f4f8 !important;
+            border: 1px dashed #1E40AF !important;
+            padding: 6px 12px !important;
+            height: auto !important;
+        }
+        </style>
+    """, unsafe_allow_html=True)
 
 st.sidebar.markdown("---")
 
@@ -139,7 +145,7 @@ if uploaded_file:
                 name='Punto alto, acumulación por flotación'
             ))
 
-            # Resaltado en rojo grueso para los tramos con arrastre insuficiente
+            # Resaltar en rojo grueso para los tramos con arrastre insuficiente
             for i in range(1, len(df)):
                 if df.loc[i, 'riesgo_hidraulico']:
                     fig.add_trace(go.Scatter(
