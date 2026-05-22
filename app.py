@@ -6,7 +6,7 @@ import plotly.graph_objects as go
 # 1. CONFIGURACIÓN DE PÁGINA Y ESTILOS BASE
 st.set_page_config(page_title="Analizador de Aire Atrapado", layout="wide")
 
-# CSS personalizado: Máximo ancho horizontal, reducción drástica de espacios verticales en sidebar y eliminación del texto en rojo
+# CSS personalizado: Máxima amplitud horizontal y optimización vertical agresiva del sidebar
 st.markdown("""
     <style>
     /* Optimización del contenedor principal */
@@ -14,64 +14,79 @@ st.markdown("""
     h1 { font-size: 1.8rem !important; font-weight: 700; color: #1E3A8A; }
     .discreet-note { font-size: 11px; color: #888; margin-top: 30px; border-top: 1px solid #eee; padding-top: 10px; }
     
-    /* ---- OPTIMIZACIÓN VERTICAL DEL SIDEBAR ---- */
-    [data-testid="stSidebar"] h1 { font-size: 1.2rem !important; line-height: 1.3; margin-bottom: 0.5rem !important; }
+    /* ---- OPTIMIZACIÓN VERTICAL ULTRA-COMPACTA DEL SIDEBAR ---- */
+    [data-testid="stSidebar"] h1 { font-size: 1.2rem !important; line-height: 1.3; margin-bottom: 0.2rem !important; }
     
-    /* Reducir el espaciado (padding) superior interno del sidebar */
-    [data-testid="stSidebarUserContent"] { padding-top: 1.5rem !important; padding-bottom: 1rem !important; }
+    /* Reducir el espaciado (padding) superior interno del sidebar de Streamlit */
+    [data-testid="stSidebarUserContent"] { padding-top: 1.0rem !important; padding-bottom: 0.5rem !important; }
     
-    /* Compactar la separación entre elementos consecutivos del sidebar */
-    [data-testid="stSidebar"] [data-testid="stVerticalBlock"] > div {
-        padding-bottom: 0.4rem !important;
-        padding-top: 0.4rem !important;
+    /* Eliminar gaps por defecto entre los bloques verticales del sidebar */
+    [data-testid="stSidebar"] [data-testid="stVerticalBlockBorderWrapper"] > div > [data-testid="stVerticalBlock"] {
+        gap: 0.2rem !important;
     }
     
-    /* Ajustar las líneas divisorias (hr) para que no roben tanto espacio vertical */
+    /* Compactar la separación entre cada widget individual */
+    [data-testid="stSidebar"] [data-testid="stVerticalBlock"] > div {
+        padding-bottom: 0.1rem !important;
+        padding-top: 0.1rem !important;
+    }
+    
+    /* Forzar márgenes mínimos en las etiquetas de los inputs */
+    [data-testid="stSidebar"] .stTextInput label {
+        margin-bottom: 0.1rem !important;
+    }
+    
+    /* Ajustar las líneas divisorias (hr) para que sean hilos delgados sin margen muerto */
     [data-testid="stSidebar"] hr {
-        margin-top: 0.6rem !important;
-        margin-bottom: 0.6rem !important;
+        margin-top: 0.4rem !important;
+        margin-bottom: 0.4rem !important;
     }
 
-    /* ---- ELIMINAR TEXTO EN ROJO Y MODIFICAR BOTÓN (+) ---- */
-    /* Oculta por completo la fila de metadata del archivo en rojo/gris (nombre de archivo, tamaño y botón de eliminar nativos) */
+    /* ---- ELIMINAR SUBTEXTO DE METADATOS DEL ARCHIVO (Bloque Gris/Rojo) ---- */
     [data-testid="stFileUploaderDropzone"] + div {
         display: none !important;
-    }
-    
-    /* Transforma el botón '+' en 'Carga un archivo diferente' cuando ya hay un archivo activo */
-    [data-testid="stFileUploaderDropzone"] button::before {
-        content: "Carga un archivo diferente";
-        font-size: 13px;
-        color: #1E40AF;
-        font-weight: 600;
-    }
-    [data-testid="stFileUploaderDropzone"] button svg {
-        display: none !important; /* Oculta el signo + nativo */
-    }
-    [data-testid="stFileUploaderDropzone"] button {
-        width: 100% !important;
-        background-color: #f0f4f8 !important;
-        border: 1px dashed #1E40AF !important;
-        padding: 6px 12px !important;
-        height: auto !important;
-        margin-top: 5px !important;
     }
     </style>
 """, unsafe_allow_html=True)
 
-# 2. BARRA LATERAL (SIDEBAR) - Estructura Visual Ultra-Compacta
+# 2. BARRA LATERAL (SIDEBAR) - Estructura Visual
 st.sidebar.title("Analizador de Aire Atrapado en Conductos a Presión")
 
 # A. Cargador de archivos en la parte superior
 uploaded_file = st.sidebar.file_uploader("Carga tu perfil en Excel o CSV", type=["xlsx", "csv"])
 
+# LÓGICA DINÁMICA DE INTERFAZ: Inyectar CSS para cambiar el '+' SOLO cuando ya existe un archivo cargado
+if uploaded_file is not None:
+    st.markdown("""
+        <style>
+        /* Modifica el botón de reemplazo (+) únicamente si el archivo está en memoria */
+        [data-testid="stFileUploaderDropzone"] button::before {
+            content: "Carga un archivo diferente";
+            font-size: 13px;
+            color: #1E40AF;
+            font-weight: 600;
+        }
+        [data-testid="stFileUploaderDropzone"] button svg {
+            display: none !important; /* Oculta el signo + nativo */
+        }
+        [data-testid="stFileUploaderDropzone"] button {
+            width: 100% !important;
+            background-color: #f0f4f8 !important;
+            border: 1px dashed #1E40AF !important;
+            padding: 6px 12px !important;
+            height: auto !important;
+            margin-top: 4px !important;
+        }
+        </style>
+    """, unsafe_allow_html=True)
+
 st.sidebar.markdown("---")
 
-# B. Entradas numéricas abajo de la carga (Campos limpios sin botones + / -)
+# B. Entradas numéricas abajo de la carga (Campos de texto limpios sin botones + / -)
 q_input = st.sidebar.text_input("Caudal (m³/s)", value="0.075")
 d_input = st.sidebar.text_input("Diámetro Interno (m)", value="0.305")
 
-# Conversión segura de cadenas a flotantes para evitar caídas de ejecución
+# Conversión segura de cadenas a flotantes para evitar quiebres en ejecución
 try:
     q_m3s = float(q_input) if q_input else 0.000
     d_m = float(d_input) if d_input else 0.010
@@ -81,7 +96,7 @@ except ValueError:
 
 st.sidebar.markdown("---")
 
-# C. Instrucciones estrictas de formato para el archivo
+# C. Instrucciones de formato para el archivo
 st.sidebar.info("""
 **Instrucciones de formato del archivo:**
 1. Debe contener dos columnas.
@@ -125,7 +140,7 @@ if uploaded_file:
             # 2. Análisis geométrico de picos (Crestas locales de acumulación por flotación)
             df['es_cresta'] = (df[col_z] > df[col_z].shift(1)) & (df[col_z] > df[col_z].shift(-1))
             
-            # 3. Análisis cinemático de differentials por tramo
+            # 3. Análisis cinemático de diferenciales por tramo
             df['dx'] = df[col_x].diff()
             df['dz'] = df[col_z].diff()
             
