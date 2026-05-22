@@ -15,34 +15,34 @@ st.markdown("""
     .discreet-note { font-size: 11px; color: #888; margin-top: 30px; border-top: 1px solid #eee; padding-top: 10px; }
     
     /* ---- OPTIMIZACIÓN VERTICAL ULTRA-COMPACTA DEL SIDEBAR ---- */
-    [data-testid="stSidebar"] h1 { font-size: 1.2rem !important; line-height: 1.3; margin-bottom: 0.2rem !important; }
+    [data-testid="stSidebar"] h1 { font-size: 1.2rem !important; line-height: 1.3; margin-bottom: 0.1rem !important; }
     
     /* Reducir el espaciado (padding) superior interno del sidebar de Streamlit */
-    [data-testid="stSidebarUserContent"] { padding-top: 1.0rem !important; padding-bottom: 0.5rem !important; }
+    [data-testid="stSidebarUserContent"] { padding-top: 0.8rem !important; padding-bottom: 0.3rem !important; }
     
     /* Eliminar gaps por defecto entre los bloques verticales del sidebar */
     [data-testid="stSidebar"] [data-testid="stVerticalBlockBorderWrapper"] > div > [data-testid="stVerticalBlock"] {
-        gap: 0.2rem !important;
+        gap: 0.1rem !important;
     }
     
     /* Compactar la separación entre cada widget individual */
     [data-testid="stSidebar"] [data-testid="stVerticalBlock"] > div {
-        padding-bottom: 0.1rem !important;
-        padding-top: 0.1rem !important;
+        padding-bottom: 0.05rem !important;
+        padding-top: 0.05rem !important;
     }
     
     /* Forzar márgenes mínimos en las etiquetas de los inputs */
     [data-testid="stSidebar"] .stTextInput label {
-        margin-bottom: 0.1rem !important;
+        margin-bottom: 0.05rem !important;
     }
     
     /* Ajustar las líneas divisorias (hr) para que sean hilos delgados sin margen muerto */
     [data-testid="stSidebar"] hr {
-        margin-top: 0.4rem !important;
-        margin-bottom: 0.4rem !important;
+        margin-top: 0.3rem !important;
+        margin-bottom: 0.3rem !important;
     }
 
-    /* ---- ELIMINAR SUBTEXTO DE METADATOS DEL ARCHIVO (Bloque Gris/Rojo) ---- */
+    /* ---- ELIMINAR SUBTEXTO DE METADATOS Y NOMBRE NATIVO DEL ARCHIVO ---- */
     [data-testid="stFileUploaderDropzone"] + div {
         display: none !important;
     }
@@ -55,11 +55,19 @@ st.sidebar.title("Analizador de Aire Atrapado en Conductos a Presión")
 # A. Cargador de archivos en la parte superior
 uploaded_file = st.sidebar.file_uploader("Carga tu perfil en Excel o CSV", type=["xlsx", "csv"])
 
-# LÓGICA DINÁMICA DE INTERFAZ: Inyectar CSS para cambiar el '+' SOLO cuando ya existe un archivo cargado
+# LÓGICA DINÁMICA DE INTERFAZ: Inyectar CSS de reemplazo y ocultamiento absoluto SOLO cuando hay archivo
 if uploaded_file is not None:
     st.markdown("""
         <style>
-        /* Modifica el botón de reemplazo (+) únicamente si el archivo está en memoria */
+        /* Ocultar la etiqueta nativa que muestra el nombre del archivo cargado (lo indicado con la flecha) */
+        [data-testid="stFileUploaderFileName"] {
+            display: none !important;
+        }
+        [data-testid="stFileUploaderDropzone"] div div div {
+            display: none !important; /* Remueve textos internos residuales del contenedor */
+        }
+        
+        /* Modifica el botón de reemplazo (+) para que actúe como el cargador principal */
         [data-testid="stFileUploaderDropzone"] button::before {
             content: "Carga un archivo diferente";
             font-size: 13px;
@@ -75,7 +83,7 @@ if uploaded_file is not None:
             border: 1px dashed #1E40AF !important;
             padding: 6px 12px !important;
             height: auto !important;
-            margin-top: 4px !important;
+            margin-top: 2px !important;
         }
         </style>
     """, unsafe_allow_html=True)
