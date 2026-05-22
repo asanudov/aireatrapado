@@ -41,11 +41,6 @@ st.markdown("""
         margin-top: 0.3rem !important;
         margin-bottom: 0.3rem !important;
     }
-
-    /* ---- ELIMINAR SUBTEXTO DE METADATOS Y NOMBRE NATIVO DEL ARCHIVO ---- */
-    [data-testid="stFileUploaderDropzone"] + div {
-        display: none !important;
-    }
     </style>
 """, unsafe_allow_html=True)
 
@@ -55,19 +50,17 @@ st.sidebar.title("Analizador de Aire Atrapado en Conductos a Presión")
 # A. Cargador de archivos en la parte superior
 uploaded_file = st.sidebar.file_uploader("Carga tu perfil en Excel o CSV", type=["xlsx", "csv"])
 
-# LÓGICA DINÁMICA DE INTERFAZ: Inyectar CSS de reemplazo y ocultamiento absoluto SOLO cuando hay archivo
+# LÓGICA DE INTERFAZ SOLICITADA:
+# Si el archivo YA está cargado, aplicamos CSS para ocultar el subtexto nativo y transformar el '+' en el botón secundario.
 if uploaded_file is not None:
     st.markdown("""
         <style>
-        /* Ocultar la etiqueta nativa que muestra el nombre del archivo cargado (lo indicado con la flecha) */
-        [data-testid="stFileUploaderFileName"] {
+        /* Oculta la metadata redundante de abajo (tamaño del archivo y botón de eliminar nativo) */
+        [data-testid="stFileUploaderDropzone"] + div {
             display: none !important;
         }
-        [data-testid="stFileUploaderDropzone"] div div div {
-            display: none !important; /* Remueve textos internos residuales del contenedor */
-        }
         
-        /* Modifica el botón de reemplazo (+) para que actúe como el cargador principal */
+        /* Modifica el botón inferior (+) para que diga textualmente "Carga un archivo diferente" */
         [data-testid="stFileUploaderDropzone"] button::before {
             content: "Carga un archivo diferente";
             font-size: 13px;
@@ -83,7 +76,7 @@ if uploaded_file is not None:
             border: 1px dashed #1E40AF !important;
             padding: 6px 12px !important;
             height: auto !important;
-            margin-top: 2px !important;
+            margin-top: 4px !important;
         }
         </style>
     """, unsafe_allow_html=True)
