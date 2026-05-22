@@ -25,6 +25,37 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
+# ALGORITMO RAMER-DOUGLAS-PEUCKER PARA SIMPLIFICACIÓN EN TRAMOS RECTOS
+def find_distance(pt, pt1, pt2):
+    """Calcula la distancia perpendicular de un punto a una línea recta."""
+    if np.all(pt1 == pt2):
+        return np.linalg.norm(pt - pt1)
+    return np.divide(
+        np.abs(np.cross(pt2 - pt1, pt1 - pt)),
+        np.linalg.norm(pt2 - pt1)
+    )
+
+def ramer_douglas_peucker(points, epsilon):
+    """Simplifica una serie de puntos en tramos rectos usando una tolerancia (epsilon)."""
+    if len(points) < 3:
+        return points
+    
+    dmax = 0.0
+    index = 0
+    end = len(points) - 1
+    for i in range(1, end):
+        d = find_distance(points[i], points[0], points[end])
+        if d > dmax:
+            index = i
+            dmax = d
+            
+    if dmax > epsilon:
+        results1 = ramer_douglas_peucker(points[:index+1], epsilon)
+        results2 = ramer_douglas_peucker(points[index:], epsilon)
+        return np.vstack((results1[:-1], results2))
+    else:
+        return np.vstack((points[0], points[end]))
+
 # 2. BARRA LATERAL (SIDEBAR)
 st.sidebar.title("Analizador Hidráulico de Conducciones")
 
@@ -45,14 +76,17 @@ if uploaded_file is not None:
 
 st.sidebar.markdown("---")
 
-# Parámetros Hidráulicos de Entrada basados en tus datos reales
+# Parámetros Hidráulicos reales para El Realito
 q_input = st.sidebar.text_input("Caudal de Diseño Q (m³/s)", value="0.565")
 d_input = st.sidebar.text_input("Diámetro Interno D (m)", value="1.219")
 
-# CONTROL DE SUAVIZADO: Esencial para limpiar el ruido de puntos a cada 20m
-st.sidebar.markdown("**Filtrado de Ruido Topográfico**")
-ventana_suavizado = st.sidebar.slider("Ventana de Suavizado (Nodos)", min_value=5, max_value=101, value=35, step=2,
-                                      help="Aumenta este valor para perfiles con alta densidad de puntos como El Realito para eliminar falsas crestas.")
+st.sidebar.markdown("---")
+st.sidebar.markdown("**Simplificación del Perfil (Tramos Rectos)**")
+epsilon_val = st.sidebar.slider(
+    "Tolerancia de Rectas (m)", 
+    min_value=0.5, max_value=15.0, value=3.0, step=0.5,
+    help="Define qué tanto ruido vertical se ignora para tirar una sola línea recta diagonal. Valores mayores generan tramos más limpios."
+)
 
 st.sidebar.markdown("---")
 
@@ -92,8 +126,6 @@ if uploaded_file:
 
         if col_x and col_z:
             g = 9.81
-            
-            # Forzamos conversión numérica por seguridad
             df[col_x] = pd.to_numeric(df[col_x])
             df[col_z] = pd.to_numeric(df[col_z])
             df = df.sort_values(by=col_x).reset_index(drop=True)
@@ -104,94 +136,115 @@ if uploaded_file:
             except ValueError:
                 q_m3s, d_m = 0.565, 1.219
 
-            # ---- ALGORITMO DE SUAVIZADO MACROSCÓPICO (MEDIA MÓVIL) ----
-            # Generamos una columna auxiliar suavizada para determinar la macro-tendencia de la pendiente
-            df['z_suavizada'] = df[col_z].rolling(window=ventana_suavizado, center=True, min_periods=1).mean()
+            # ---- MOTOR 1: APLICACIÓN DEL ALGORITMO RDP PARA PERFIL EN TRAMOS RECTOS ----
+            puntos_originales = df[[col_x, col_z]].to_numpy()
+            puntos_simplificados = ramer_douglas_peucker(puntos_originales, epsilon_val)
+            
+            df_rdp = pd.DataFrame(puntos_simplificados, columns=[col_x, 'z_recta'])
+            
+            # Interpolamos linealmente el perfil simplificado para re-asociarlo al dataframe original punto por punto
+            df['z_simplificada'] = np.interp(df[col_x], df_rdp[col_x], df_rdp['z_recta'])
+            
+            # Identificamos los verdaderos vértices maestros (crestas y valles reales del acueducto simplificado)
+            df['es_vertice'] = df[col_x].isin(df_rdp[col_x])
+            df['es_cresta'] = df['es_vertice'] & (df['z_simplificada'] > df['z_simplificada'].shift(1, fill_value=df['z_simplificada'].iloc[0])) & (df['z_simplificada'] > df['z_simplificada'].shift(-1, fill_value=df['z_simplificada'].iloc[-1]))
+            df['es_valle'] = df['es_vertice'] & (df['z_simplificada'] < df['z_simplificada'].shift(1, fill_value=df['z_simplificada'].iloc[0])) & (df['z_simplificada'] < df['z_simplificada'].shift(-1, fill_value=df['z_simplificada'].iloc[-1]))
 
-            # ---- MOTOR DE CÁLCULO 1: HIDRÁULICA (SOBRE EL PERFIL SUAVIZADO) ----
+            # ---- MOTOR 2: ANÁLISIS HIDRÁULICO (PGA / UNAM / KALINSKE) SOBRE PENDIENTES REALES SIMPLIFICADAS ----
             pga_sistema = q_m3s / np.sqrt(g * (d_m**5)) if d_m > 0 else 0
             
-            # Crestas macro sobre la curva suavizada para evitar falsos positivos
-            df['es_cresta'] = (df['z_suavizada'] > df['z_suavizada'].shift(1)) & (df['z_suavizada'] > df['z_suavizada'].shift(-1))
-            df['es_valle'] = (df['z_suavizada'] < df['z_suavizada'].shift(1)) & (df['z_suavizada'] < df['z_suavizada'].shift(-1))
+            # Calculamos las pendientes basándonos en los tramos rectos maestros
+            df['dx_sim'] = df[col_x].diff()
+            df['dz_sim'] = df['z_simplificada'].diff()
+            df['S_sim'] = -df['dz_sim'] / df['dx_sim'].replace(0, np.nan)
             
-            df['dx'] = df[col_x].diff()
-            df['dz'] = df[col_z].diff() # El cálculo de pendiente local real se queda con la elevación del terreno
-            df['S'] = -df['dz'] / df['dx'].replace(0, np.nan)
-            
-            df['riesgo_hidraulico'] = (df['S'] > 0) & (pga_sistema < np.sqrt(df['S'].fillna(0)))
-            df['v_critica'] = 1.146 * np.sqrt(g * d_m * df['S']).fillna(0)
+            # Evaluación del riesgo de arrastre insuficiente (PGA vs Pendiente del tramo recto)
+            df['riesgo_hidraulico'] = (df['S_sim'] > 0) & (pga_sistema < np.sqrt(df['S_sim'].fillna(0)))
+            df['v_critica'] = 1.146 * np.sqrt(g * d_m * df['S_sim']).fillna(0)
             
             area = np.pi * (d_m**2) / 4 if d_m > 0 else 1
             v_real = q_m3s / area
 
-            # ---- MOTOR DE CÁLCULO 2: ANÁLISIS DE PENDIENTES LARGAS EN CURVA SUAVIZADA ----
+            # ---- MOTOR 3: VÁLVULAS INTERMEDIAS EN PENDIENTES LARGAS RECTAS (WANG ET AL., 2023) ----
             df['critico_pendiente_larga'] = False
             
             if activar_anticolapso:
-                # Tomamos los nodos macro limpios de la curva planchada
-                df_macro = df[df['es_cresta'] | df['es_valle']].copy()
-                df_macro = df_macro.sort_values(by=col_x).reset_index()
+                # Extraemos solo los vértices maestros de los tramos rectos
+                df_vertices = df[df['es_vertice']].copy().sort_values(by=col_x).reset_index()
                 
-                for idx in range(len(df_macro) - 1):
-                    nodo_a = df_macro.loc[idx]
-                    nodo_b = df_macro.loc[idx+1]
+                for idx in range(len(df_vertices) - 1):
+                    nodo_a = df_vertices.loc[idx]
+                    nodo_b = df_vertices.loc[idx+1]
                     
-                    diff_macro_vertical = abs(nodo_a['z_suavizada'] - nodo_b['z_suavizada'])
+                    diff_vertical_tramo = abs(nodo_a['z_simplificada'] - nodo_b['z_simplificada'])
                     
-                    if diff_macro_vertical > limite_critico_vertical:
-                        num_valvulas_necesarias = int(diff_macro_vertical // limite_critico_vertical)
+                    # Si el tramo recto maestro completo cae o sube más del límite admisible de vacío:
+                    if diff_vertical_tramo > limite_critico_vertical:
+                        num_valvulas = int(diff_vertical_tramo // limite_critico_vertical)
                         
-                        idx_perfil_inicio = int(nodo_a['index'])
-                        idx_perfil_fin = int(nodo_b['index'])
+                        idx_inicio = int(nodo_a['index'])
+                        idx_fin = int(nodo_b['index'])
                         
-                        for nv in range(1, num_valvulas_necesarias + 1):
-                            fraccion = nv / (num_valvulas_necesarias + 1)
-                            z_objetivo = nodo_a['z_suavizada'] + fraccion * (nodo_b['z_suavizada'] - nodo_a['z_suavizada'])
+                        # Distribuimos las válvulas exactamente a lo largo del tramo recto uniforme
+                        for nv in range(1, num_valvulas + 1):
+                            fraccion = nv / (num_valvulas + 1)
+                            x_objetivo = nodo_a[col_x] + fraccion * (nodo_b[col_x] - nodo_a[col_x])
                             
-                            rango_tramo = df.iloc[idx_perfil_inicio:idx_perfil_fin+1]
+                            rango_tramo = df.iloc[idx_inicio:idx_fin+1]
                             if not rango_tramo.empty:
-                                # Mapeamos la propuesta intermedia sobre el perfil real
-                                idx_cercano = (rango_tramo['z_suavizada'] - z_objetivo).abs().idxmin()
+                                idx_cercano = (rango_tramo[col_x] - x_objetivo).abs().idxmin()
                                 df.loc[idx_cercano, 'critico_pendiente_larga'] = True
 
-            # 4. COMPONENTE GRÁFICO OPTIMIZADO SIN SUBTÍTULO
+            # 4. COMPONENTE GRÁFICO AVANZADO EN TRAMOS RECTOS
             fig = go.Figure()
 
-            # Trazado del perfil real del acueducto
+            # Perfil Real en puntos (línea gris tenue de fondo para constatar la aproximación)
             fig.add_trace(go.Scatter(
                 x=df[col_x], y=df[col_z], 
                 mode='lines', 
-                name='Perfil de Tubería Real', 
-                line=dict(color='#64748B', width=1.5, dash='dot')
+                name='Terreno Levantamiento (Ruido)', 
+                line=dict(color='#CBD5E1', width=1)
             ))
 
-            # Trazado de la línea suavizada de diseño
+            # Perfil Simplificado en Tramos Rectos Maestros (Línea Azul)
             fig.add_trace(go.Scatter(
-                x=df[col_x], y=df['z_suavizada'], 
+                x=df[col_x], y=df['z_simplificada'], 
                 mode='lines', 
-                name='Tendencia Macro Suavizada', 
+                name='Perfil de Diseño (Tramos Rectos Simples)', 
                 line=dict(color='#1E40AF', width=2.5)
             ))
 
-            # Crestas Macroscópicas Filtradas
-            crestas = df[df['es_cresta']]
-            if not crestas.empty:
+            # Hito 1: Crestas Maestras Simplificadas
+            macro_crestas = df[df['es_cresta']]
+            if not macro_crestas.empty:
                 fig.add_trace(go.Scatter(
-                    x=crestas[col_x], y=crestas[col_z], 
+                    x=macro_crestas[col_x], y=macro_crestas['z_simplificada'], 
                     mode='markers', 
-                    marker=dict(color='#F59E0B', size=12, symbol='triangle-up', line=dict(color='black', width=1)),
+                    marker=dict(color='#F59E0B', size=11, symbol='triangle-up', line=dict(color='black', width=1)),
                     name='Punto Alto Geométrico Macro'
                 ))
 
-            # Válvulas Intermedias Anticolapso Distribuidas de forma Equidistante
+            # Hito 2: Tramos Críticos por Arrastre de Aire Insuficiente (PGA) en ROJO GRUESO
+            # Resaltamos las líneas rectas completas donde la velocidad no barre el aire
+            for i in range(1, len(df)):
+                if df.loc[i, 'riesgo_hidraulico']:
+                    fig.add_trace(go.Scatter(
+                        x=[df.loc[i-1, col_x], df.loc[i, col_x]], 
+                        y=[df.loc[i-1, 'z_simplificada'], df.loc[i, 'z_simplificada']],
+                        mode='lines', 
+                        line=dict(color='#DC2626', width=4.5),
+                        name='Riesgo PGA: Arrastre de Aire Insuficiente' if i == df['riesgo_hidraulico'].idxmax() else "",
+                        showlegend=(i == df['riesgo_hidraulico'].idxmax())
+                    ))
+
+            # Hito 3: Válvulas Intermedias Anticolapso Propuetas (Púrpura)
             if activar_anticolapso:
                 p_largas = df[df['critico_pendiente_larga']]
                 fig.add_trace(go.Scatter(
-                    x=p_largas[col_x], y=p_largas[col_z], 
+                    x=p_largas[col_x], y=p_largas['z_simplificada'], 
                     mode='markers', 
-                    marker=dict(color='#D946EF', size=12, symbol='square', line=dict(color='black', width=1)),
-                    name='Válvula Intermedia (Criterio Anticolapso)'
+                    marker=dict(color='#D946EF', size=11, symbol='square', line=dict(color='black', width=1)),
+                    name='Válvula Intermedia (Macro-Tramo Recto)'
                 ))
 
             fig.update_layout(
@@ -204,35 +257,38 @@ if uploaded_file:
             )
             st.plotly_chart(fig, use_container_width=True)
 
-            # 5. MATRIZ DE RESULTADOS
+            # 5. MATRIZ DE RESULTADOS / REPORTE GENERAL ENRIQUECIDO
             st.subheader("Reporte General de Nodos Críticos Detectados")
             
-            res_table = df[(df['es_cresta']) | (df['critico_pendiente_larga'])].copy()
+            res_table = df[(df['es_cresta']) | (df['riesgo_hidraulico']) | (df['critico_pendiente_larga'])].copy()
             
             if not res_table.empty:
+                # Determinación analítica del diagnóstico técnico prioritario por nodo
                 condiciones = [
                     res_table['critico_pendiente_larga'],
-                    res_table['es_cresta']
+                    res_table['es_cresta'],
+                    res_table['riesgo_hidraulico']
                 ]
                 elecciones = [
-                    "Válvula Intermedia Sugerida (Pendiente Larga Macroscópica)",
-                    "Punto Alto Geométrico Macro (Bolsa Permanente)"
+                    "Válvula Intermedia Sugerida (Pendiente Larga Anticolapso)",
+                    "Punto Alto Geométrico Macro (Bolsa Permanente)",
+                    "Tramo de Riesgo PGA (Arrastre Insuficiente)"
                 ]
-                res_table['Diagnóstico Técnico'] = np.select(condiciones, elecciones, default="Punto de Control")
+                res_table['Diagnóstico Técnico'] = np.select(condiciones, elecciones, default="Tramo de Atención Especial")
                 
                 res_table['V. Flujo (m/s)'] = round(v_real, 3)
-                res_table['V. Mínima Barrido (m/s)'] = np.where(res_table['S'] > 0, round(res_table['v_critica'], 3), 0.000)
-                res_table['Pendiente Local (S)'] = round(res_table['S'].fillna(0), 4)
+                res_table['V. Mínima Barrido (m/s)'] = np.where(res_table['S_sim'] > 0, round(res_table['v_critica'], 3), 0.000)
+                res_table['Pendiente Tramo (S)'] = round(res_table['S_sim'].fillna(0), 4)
                 
-                output_cols = [col_x, col_z, 'Pendiente Local (S)', 'Diagnóstico Técnico', 'V. Flujo (m/s)', 'V. Mínima Barrido (m/s)']
+                output_cols = [col_x, 'z_simplificada', 'Pendiente Tramo (S)', 'Diagnóstico Técnico', 'V. Flujo (m/s)', 'V. Mínima Barrido (m/s)']
                 st.dataframe(
-                    res_table[output_cols].rename(columns={col_x: "Distancia (m)", col_z: "Elevación (m)"}), 
+                    res_table[output_cols].rename(columns={col_x: "Distancia (m)", 'z_simplificada': "Elevación (m)"}), 
                     use_container_width=True
                 )
                 
                 c1, c2 = st.columns(2)
                 with c1:
-                    st.metric(label="Parámetro de Gasto Adimensional (PGA) Actual", value=f"{pga_sistema:.4f}")
+                    st.metric(label="Parámetro de Gasto Adimensional (PGA) Actual del Acueducto", value=f"{pga_sistema:.4f}")
                 with c2:
                     if activar_anticolapso:
                         st.metric(label="Límite Vertical Macro Permitido (ΔH_D + h)", value=f"{limite_critico_vertical:.2f} m")
@@ -240,16 +296,16 @@ if uploaded_file:
                 st.success("✅ Estabilidad confirmada bajo los parámetros actuales.")
 
         else:
-            st.error("❌ Columnas no reconocidas.")
+            st.error("❌ Columnas del archivo no mapeadas.")
     except Exception as e:
-        st.error(f"Error: {e}")
+        st.error(f"Error en el motor de cálculo: {e}")
 else:
     st.info("👈 Carga el archivo de perfil para iniciar la simulación.")
 
-# 6. BIBLIOGRAFÍA
+# 6. BIBLIOGRAFÍA DE RESPALDO INSTITUCIONAL
 st.markdown("""
 <div class="discreet-note">
-    <strong>Fuentes técnicas de referencia:</strong><br>
+    <strong>Fuentes técnicas e internacionales de referencia:</strong><br>
     • <strong>Wang, Y., Zhang, J., et al. (2023).</strong> <em>Air valve arrangement criteria for preventing secondary pipe bursts in long-distance gravitational water supply systems.</em> AQUA - IWA Publishing.<br>
     • <strong>Instituto de Ingeniería, UNAM.</strong> <em>Manual de análisis de la problemática del aire atrapado en acueductos.</em> Serie Manuales, México.
 </div>
