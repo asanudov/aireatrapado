@@ -6,7 +6,7 @@ import plotly.graph_objects as go
 # 1. CONFIGURACIÓN DE PÁGINA Y ESTILOS BASE
 st.set_page_config(page_title="Analizador de Aire Atrapado", layout="wide")
 
-# CSS personalizado: Máxima amplitud horizontal y optimización vertical agresiva del sidebar
+# CSS personalizado: Máxima amplitud horizontal y optimización vertical del sidebar
 st.markdown("""
     <style>
     /* Optimización del contenedor principal */
@@ -17,15 +17,15 @@ st.markdown("""
     /* ---- OPTIMIZACIÓN VERTICAL ULTRA-COMPACTA DEL SIDEBAR ---- */
     [data-testid="stSidebar"] h1 { font-size: 1.2rem !important; line-height: 1.3; margin-bottom: 0.1rem !important; }
     
-    /* Reducir el espaciado (padding) superior interno del sidebar de Streamlit */
+    /* Reducir el espaciado superior interno del sidebar */
     [data-testid="stSidebarUserContent"] { padding-top: 0.8rem !important; padding-bottom: 0.3rem !important; }
     
-    /* Eliminar gaps por defecto entre los bloques verticales del sidebar */
+    /* Eliminar gaps por defecto entre los bloques del sidebar */
     [data-testid="stSidebar"] [data-testid="stVerticalBlockBorderWrapper"] > div > [data-testid="stVerticalBlock"] {
         gap: 0.1rem !important;
     }
     
-    /* Compactar la separación entre cada widget individual */
+    /* Compactar la separación entre cada widget */
     [data-testid="stSidebar"] [data-testid="stVerticalBlock"] > div {
         padding-bottom: 0.05rem !important;
         padding-top: 0.05rem !important;
@@ -36,13 +36,13 @@ st.markdown("""
         margin-bottom: 0.05rem !important;
     }
     
-    /* Ajustar las líneas divisorias (hr) para que sean hilos delgados sin margen muerto */
+    /* Ajustar las líneas divisorias */
     [data-testid="stSidebar"] hr {
         margin-top: 0.3rem !important;
         margin-bottom: 0.3rem !important;
     }
 
-    /* ---- OCULTAR TODO EL CONTENEDOR INTERNO DE ARCHIVOS DE STREAMLIT ---- */
+    /* ---- OCULTAR EL CONTENEDOR DE ARCHIVOS SI YA ESTÁ CARGADO ---- */
     .file-uploaded-active [data-testid="stFileUploaderDropzone"] div {
         display: none !important;
     }
@@ -58,7 +58,6 @@ st.markdown("""
 # 2. BARRA LATERAL (SIDEBAR) - Estructura Visual
 st.sidebar.title("Analizador de Aire Atrapado en Conductos a Presión")
 
-# Inicializamos una clave en el estado de la sesión si no existe para controlar el refresco limpio
 if "uploader_key" not in st.session_state:
     st.session_state["uploader_key"] = "file_uploader_v1"
 
@@ -69,7 +68,6 @@ uploaded_file = st.sidebar.file_uploader(
     key=st.session_state["uploader_key"]
 )
 
-# LÓGICA DE INTERFAZ 100% CONTROLADA POR PYTHON:
 if uploaded_file is not None:
     st.markdown("<div class='file-uploaded-active'></div>", unsafe_allow_html=True)
     
@@ -154,23 +152,31 @@ if uploaded_file:
             area = np.pi * (d_m**2) / 4 if d_m > 0 else 1
             v_real = q_m3s / area
 
-            # ---- PROPUESTA DE VÁLVULA INTERMEDIA EN TRAMOS CONTINUOS CRÍTICOS ----
+            # ---- CRITERIO HOHAI UNIVERSITY: EVALUACIÓN DEL DELTA H MÁXIMO EN EL TRAMO ----
             df['valvula_anticolapso'] = False
             
-            # Crear bloques contiguos mediante cambios de estado consecutivos de la condición booleana de riesgo
+            # Agrupación de bloques contiguos de riesgo
             df['grupo_riesgo'] = (df['riesgo_hidraulico'] != df['riesgo_hidraulico'].shift()).cumsum()
             df_sub_riesgo = df[df['riesgo_hidraulico']]
             
+            # Constantes físicas del artículo (Vacío de vaporización HD + presión residual del suelo h)
+            UMBRAL_DELTA_H_CRITICO = 10.8  # metros (10.33m + 0.5m)
+
             if not df_sub_riesgo.empty:
                 for grupo_id, data_grupo in df_sub_riesgo.groupby('grupo_riesgo'):
                     idx_inicio = data_grupo.index[0]
                     idx_fin = data_grupo.index[-1]
                     
-                    # Si es un tramo completo continuo (más de un punto en riesgo)
                     if idx_inicio < idx_fin:
-                        # Identificar el punto medio/central exacto de la lista de índices del tramo
-                        idx_centro = data_grupo.index[len(data_grupo) // 2]
-                        df.loc[idx_centro, 'valvula_anticolapso'] = True
+                        # Calcular la diferencia de elevación máxima absoluta dentro de este tramo específico
+                        z_max_tramo = data_grupo[col_z].max()
+                        z_min_tramo = data_grupo[col_z].min()
+                        delta_h_real = abs(z_max_tramo - z_min_tramo)
+                        
+                        # FILTRO FÍSICO: Solo proponer válvula si el desnivel real supera el umbral de cavitación/colapso
+                        if delta_h_real > UBRAL_DELTA_H_CRITICO:
+                            idx_centro = data_grupo.index[len(data_grupo) // 2]
+                            df.loc[idx_centro, 'valvula_anticolapso'] = True
 
             # 4. COMPONENTE GRÁFICO (MÁXIMA AMPLITUD HORIZONTAL)
             st.subheader("Perfil Longitudinal del Acueducto")
@@ -205,7 +211,7 @@ if uploaded_file:
                         showlegend=(i == df['riesgo_hidraulico'].idxmax())
                     ))
 
-            # Añadir las válvulas intermedias propuestas en la gráfica (Cuadrado fucsia, tamaño 5)
+            # Añadir las válvulas intermedias que pasaron el filtro (Cuadrado fucsia, tamaño 5)
             valvulas_activas = df[df['valvula_anticolapso']]
             if not valvulas_activas.empty:
                 fig.add_trace(go.Scatter(
@@ -215,7 +221,7 @@ if uploaded_file:
                     name='Válvula de aire intermedia para evitar colapso'
                 ))
 
-            # Layout optimizado: Forzado de leyendas al eje inferior (y=-0.18) para liberar la horizontal
+            # Layout optimizado: Forzado de leyendas al eje inferior
             fig.update_layout(
                 xaxis_title="Distancia (m)", 
                 yaxis_title="Elevación (m)", 
@@ -232,23 +238,23 @@ if uploaded_file:
             )
             st.plotly_chart(fig, use_container_width=True)
 
-            # 5. MATRIZ DE RESULTADOS / REPORTES
-            st.subheader("Reporte General de Puntos Críticos")
-            res_table = df[(df['es_cresta']) | (df['riesgo_hidraulico']) | (df['valvula_anticolapso'])].copy()
+            # 5. MATRIZ DE RESULTADOS / REPORTES (FILTRADA SOLO PARA MOSTRAR VÁLVULAS)
+            st.subheader("Reporte General de Dispositivos de Aire Propuestos")
+            
+            # FILTRO EXCLUSIVO: Solo puntos físicos con válvula (Crestas o Válvulas Intermedias Anticolapso)
+            res_table = df[(df['es_cresta']) | (df['valvula_anticolapso'])].copy()
             
             if not res_table.empty:
-                # Jerarquía condicional para asignar el diagnóstico correcto
+                # Jerarquía para definir el diagnóstico
                 condiciones = [
                     res_table['valvula_anticolapso'],
-                    res_table['es_cresta'],
-                    res_table['riesgo_hidraulico']
+                    res_table['es_cresta']
                 ]
                 elecciones = [
                     "Válvula de aire intermedia para evitar colapso",
-                    "Punto Alto Geométrico (Bolsa Permanente)",
-                    "Aire Estacionario (Falta de Arrastre en Pendiente)"
+                    "Punto Alto Geométrico (Bolsa Permanente)"
                 ]
-                res_table['Diagnóstico del Aire'] = np.select(condiciones, elecciones, default="Tramo Singular")
+                res_table['Diagnóstico del Aire'] = np.select(condiciones, elecciones, default="Dispositivo")
 
                 res_table['V. Flujo (m/s)'] = round(v_real, 3)
                 res_table['V. Mínima Barrido (m/s)'] = np.where(res_table['S'] > 0, round(res_table['v_critica'], 3), 0.000)
@@ -262,7 +268,7 @@ if uploaded_file:
                 
                 st.metric(label="Parámetro de Gasto Adimensional [Q²/(g·D⁵)] del Sistema", value=f"{parametro_sistema_sq:.5f}")
             else:
-                st.success("✅ El sistema opera con estabilidad. No se detectaron puntos altos ni tramos con insuficiencia de arrastre.")
+                st.success("✅ El sistema opera con estabilidad. No se detectaron puntos altos ni tramos que requieran válvulas de aire intermedias.")
 
         else:
             st.error("❌ Formato inválido. Asegúrate de que las columnas del archivo sigan estrictamente las instrucciones de la barra lateral.")
@@ -271,7 +277,7 @@ if uploaded_file:
 else:
     st.info("👈 Por favor, ingresa tu archivo de perfil (.csv o .xlsx) y configura las variables en el menú lateral para iniciar el análisis hidráulico.")
 
-# 6. BIBLIOGRAFÍA DE RESPALDO INSTITUCIONAL
+# 6. BIBLIOGRAFÍA DE RESPALDO INSTITUCIONAL (CON EL ARTÍCULO ADJUNTO DE HOHAI UNIVERSITY)
 st.markdown("""
 <div class="discreet-note">
     <strong>Fuentes técnicas e institucionales de referencia:</strong><br>
