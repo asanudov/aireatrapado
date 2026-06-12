@@ -208,7 +208,7 @@ if uploaded_file:
                         
                         pdf.set_font("Arial", "B", 14)
                         pdf.set_text_color(40, 40, 40)
-                        pdf.cell(0, 10, "REPORTE DE DIMENSIONAMIENTO Y DISPOSITIVOS DE AIRE", ln=1)
+                        pdf.cell(0, 10, "REPORTE DE UBICACIÓN DE VÁLVULAS DE AIRE", ln=1)
                         pdf.ln(2)
                         
                         # Datos de Entrada Generales
