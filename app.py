@@ -28,24 +28,18 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# CLASE GENERADORA DE PDF CON ESTILO INSTITUCIONAL
+# CLASE GENERADORA DE PDF CON BANDA AZUL DE CONTRASTE PARA EL LOGO
 class ReportePDF(FPDF):
     def header(self):
+        # Dibujar una banda azul marino superior de fondo para albergar el logo blanco
+        self.set_fill_color(30, 58, 138) # Azul Oscuro de Aquestia
+        self.rect(0, 0, 210, 32, "F")
+        
+        # Colocar el logo blanco encima de la banda azul
         if os.path.exists("logo.png"):
-            self.image("logo.png", x=12, y=10, w=45)
+            self.image("logo.png", x=12, y=6, w=48)
         
-        self.set_font("Arial", "B", 14)
-        self.set_text_color(30, 58, 138)
-        self.cell(0, 8, "Aquestia Mexico", ln=1, align="R")
-        
-        self.set_font("Arial", "", 9)
-        self.set_text_color(100, 100, 100)
-        self.cell(0, 5, "Reporte Tecnico de Optimizacion Hidraulica", ln=1, align="R")
-        
-        self.set_draw_color(220, 220, 220)
-        self.set_line_width(0.5)
-        self.line(12, 28, 198, 28)
-        self.ln(12)
+        self.ln(24) # Ajustar el cursor de dibujo abajo de la banda
 
     def footer(self):
         self.set_y(-20)
@@ -75,6 +69,8 @@ if uploaded_file is not None:
         st.rerun()
 
 st.sidebar.markdown("---")
+# Campos de entrada de datos generales
+nombre_acueducto = st.sidebar.text_input("Nombre del Acueducto", value="Línea Troncal Norte")
 q_input = st.sidebar.text_input("Caudal (m³/s)", value="0.075")
 d_input = st.sidebar.text_input("Diámetro Interno (m)", value="0.305")
 
@@ -107,6 +103,9 @@ if uploaded_file:
             df[col_x] = pd.to_numeric(df[col_x])
             df[col_z] = pd.to_numeric(df[col_z])
             df = df.sort_values(by=col_x).reset_index(drop=True)
+
+            # Cómputo de la longitud total del acueducto basada en el trazo físico
+            longitud_total = df[col_x].max() - df[col_x].min()
 
             if d_m < 0.100:
                 st.warning("⚠️ **Nota técnica:** El diámetro ingresado es menor a 100 mm.")
@@ -178,18 +177,24 @@ if uploaded_file:
                 
                 st.dataframe(res_table_renamed[output_cols], use_container_width=True, hide_index=True)
                 
-                st.metric(label="Parámetro de Gasto Adimensional [Q²/(g·D^5)] del Sistema", value=f"{parametro_sistema_sq:.5f}")
-                
-                # ---- CONCLUSIÓN GENERAL ----
+                # ---- CONCLUSIÓN GENERAL DINÁMICA ----
                 st.subheader("Conclusión General del Sistema")
                 total_crestas = len(crestas)
                 total_intermedias = len(valvulas_activas)
                 
-                texto_conclusion = f"El analisis del perfil revela la existencia de {total_crestas} punto(s) alto(s) geometricos principales donde es mandatoria la instalacion de purgadores por flotacion natural. Con respecto a los tramos de pendiente descendente critica evaluados mediante el criterio cinetico de la UNAM, se identifico riesgo latente de acumulacion y bolsas atrapadas debido a que la velocidad real de operacion ({v_real:.3f} m/s) se encuentra por debajo de la velocidad minima de barrido calculada. Aplicando el filtro de deformacion por descompresion de Hohai University, unicamente {total_intermedias} de los tramos criticos superan el umbral de delta H de {UMBRAL_DELTA_H_CRITICO} m, requiriendo de manera estricta una valvula de aire intermedia para mitigar el riesgo de colapso secundario por ruptura."
+                texto_conclusion = (
+                    f"El analisis del perfil del acueducto '{nombre_acueducto}', el cual cuenta con un diametro interno de de {d_m:.3f} m "
+                    f"y una longitud total analizada de {longitud_total:.1f} m, revela la existencia de {total_crestas} punto(s) alto(s) geometrico(s) "
+                    f"principales donde es mandatoria la instalacion de valvulas de admision, expulsion y eliminacion de aire para asegurar la correcta evacuacion "
+                    f"del aire por flotacion natural. Con respecto a los tramos de pendiente descendente critica evaluados mediante el criterio cinetico de la UNAM, "
+                    f"se identifico riesgo latente de bolsas de aire atrapadas debido a que la velocidad real de operacion ({v_real:.3f} m/s) es inferior a la velocidad minima de barrido. "
+                    f"Aplicando el filtro de deformacion por descompresion de Hohai University, unicamente {total_intermedias} de los tramos criticos superan el umbral de delta H de {UMBRAL_DELTA_H_CRITICO} m, "
+                    f"requiriendo de manera estricta una valvula de aire intermedia para mitigar el riesgo de colapso secundario por ruptura."
+                )
                 st.write(texto_conclusion)
 
                 # =========================================================
-                # CONFIGURACIÓN Y COMPILACIÓN DEL PDF SIN CARACTERES UNICODE RARO
+                # COMPILACIÓN DEL PDF AJUSTADO (SIN FÓRMULA DEL PGA)
                 # =========================================================
                 st.markdown("---")
                 if st.button("📄 Generar y Descargar Reporte PDF Institucional", use_container_width=True):
@@ -206,7 +211,7 @@ if uploaded_file:
                         pdf.cell(0, 10, "REPORTE DE DIMENSIONAMIENTO Y DISPOSITIVOS DE AIRE", ln=1)
                         pdf.ln(2)
                         
-                        # Datos de Entrada
+                        # Datos de Entrada Generales
                         pdf.set_font("Arial", "B", 11)
                         pdf.set_fill_color(240, 243, 248) 
                         pdf.set_text_color(30, 58, 138)
@@ -215,17 +220,19 @@ if uploaded_file:
                         
                         pdf.set_font("Arial", "", 10)
                         pdf.set_text_color(50, 50, 50)
-                        pdf.cell(60, 6, "Caudal de diseño (Q):", border="B")
-                        pdf.cell(40, 6, f"{q_m3s:.3f} m3/s", border="B", ln=1)
-                        pdf.cell(60, 6, "Diámetro interno de conducción:", border="B")
-                        pdf.cell(40, 6, f"{d_m:.3f} m", border="B", ln=1)
+                        pdf.cell(60, 6, "Nombre del Sistema / Acueducto:", border="B")
+                        pdf.cell(100, 6, f"{nombre_acueducto}", border="B", ln=1)
+                        pdf.cell(60, 6, "Longitud total de conduccion:", border="B")
+                        pdf.cell(100, 6, f"{longitud_total:.1f} m", border="B", ln=1)
+                        pdf.cell(60, 6, "Caudal de diseno (Q):", border="B")
+                        pdf.cell(100, 6, f"{q_m3s:.3f} m3/s", border="B", ln=1)
+                        pdf.cell(60, 6, "Diametro interno de conduccion (D):", border="B")
+                        pdf.cell(100, 6, f"{d_m:.3f} m", border="B", ln=1)
                         pdf.cell(60, 6, "Velocidad media del flujo:", border="B")
-                        pdf.cell(40, 6, f"{v_real:.3f} m/s", border="B", ln=1)
-                        pdf.cell(60, 6, "Parámetro adimensional [Q2/(g*D^5)]:", border="B")
-                        pdf.cell(40, 6, f"{parametro_sistema_sq:.5f}", border="B", ln=1)
+                        pdf.cell(100, 6, f"{v_real:.3f} m/s", border="B", ln=1)
                         pdf.ln(6)
                         
-                        # Gráfico
+                        # Gráfico del Perfil
                         pdf.set_font("Arial", "B", 11)
                         pdf.cell(0, 7, " 2. Perfil Longitudinal y Ubicacion de Dispositivos", ln=1, fill=True)
                         pdf.ln(2)
@@ -233,7 +240,7 @@ if uploaded_file:
                             pdf.image("temp_perfil.png", x=15, w=180)
                             pdf.ln(5)
                         
-                        # Tabla
+                        # Tabla Resumen Física
                         pdf.set_font("Arial", "B", 11)
                         pdf.cell(0, 7, " 3. Tabla Resumen de Dispositivos de Aire Propuestos", ln=1, fill=True)
                         pdf.ln(3)
@@ -263,7 +270,7 @@ if uploaded_file:
                         
                         pdf.ln(6)
                         
-                        # Conclusión
+                        # Conclusiones Generales Modificadas
                         pdf.set_font("Arial", "B", 11)
                         pdf.set_text_color(30, 58, 138)
                         pdf.cell(0, 7, " 4. Conclusiones y Recomendaciones Tecnicas", ln=1, fill=True)
@@ -295,11 +302,9 @@ if uploaded_file:
     except Exception as e:
         st.error(f"Error al procesar: {e}")
 else:
-    st.info("👈 Por favor, ingresa tu archivo de perfil (.csv o .xlsx) y configura las variables en el menú lateral para iniciar el análisis hidráulico.")
+    st.info("👈 Por favor, ingresa tu archivo de perfil (.csv o .xlsx), introduce el nombre del acueducto y configura las variables en el menú lateral.")
 
-# =========================================================
-# 4. SECCIÓN BIBLIOGRÁFICA INSTITUCIONAL (RESTAURADA)
-# =========================================================
+# 4. SECCIÓN BIBLIOGRÁFICA INSTITUCIONAL
 st.markdown("""
 <div class="discreet-note">
     <strong>Fuentes técnicas e institucionales de referencia:</strong><br>
