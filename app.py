@@ -238,10 +238,10 @@ if uploaded_file:
             )
             st.plotly_chart(fig, use_container_width=True)
 
-            # 5. MATRIZ DE RESULTADOS / REPORTES (FILTRADA SOLO PARA MOSTRAR VÁLVULAS)
+            # 5. MATRIZ DE RESULTADOS / REPORTES (FILTRADA SOLO PARA MOSTRAR DISPOSITIVOS)
             st.subheader("Reporte General de Dispositivos de Aire Propuestos")
             
-            # FILTRO EXCLUSIVO: Solo puntos físicos con válvula (Crestas o Válvulas Intermedias Anticolapso)
+            # FILTRO EXCLUSIVO: Crestas o Válvulas Intermedias Anticolapso
             res_table = df[(df['es_cresta']) | (df['valvula_anticolapso'])].copy()
             
             if not res_table.empty:
@@ -260,15 +260,23 @@ if uploaded_file:
                 res_table['V. Mínima Barrido (m/s)'] = np.where(res_table['S'] > 0, round(res_table['v_critica'], 3), 0.000)
                 res_table['Pendiente (S)'] = round(res_table['S'].fillna(0), 4)
                 
-                output_cols = [col_x, col_z, 'Pendiente (S)', 'Diagnóstico del Aire', 'V. Flujo (m/s)', 'V. Mínima Barrido (m/s)']
+                # ---- ASIGNACIÓN DE CONSECUTIVO SERIAL (1 a n) ----
+                res_table = res_table.sort_values(by=col_x).reset_index(drop=True)
+                res_table['No. de Válvula'] = res_table.index + 1
+                
+                # Reorganización final de columnas con renombrado limpio
+                res_table = res_table.rename(columns={col_x: "Distancia (m)", col_z: "Elevación (m)"})
+                output_cols = ['No. de Válvula', 'Distancia (m)', 'Elevación (m)', 'Pendiente (S)', 'Diagnóstico del Aire', 'V. Flujo (m/s)', 'V. Mínima Barrido (m/s)']
+                
                 st.dataframe(
-                    res_table[output_cols].rename(columns={col_x: "Distancia (m)", col_z: "Elevación (m)"}), 
-                    use_container_width=True
+                    res_table[output_cols], 
+                    use_container_width=True,
+                    hide_index=True  # Oculta los índices internos redundantes del DataFrame
                 )
                 
                 st.metric(label="Parámetro de Gasto Adimensional [Q²/(g·D⁵)] del Sistema", value=f"{parametro_sistema_sq:.5f}")
             else:
-                st.success("✅ El sistema opera con estabilidad. No se detectaron puntos altos ni tramos que requieran válvulas de aire intermedias.")
+                st.success("✅ El sistema opera con estabilidad. No se detectaron puntos altos ni tramos que requieran válvulas de aire.")
 
         else:
             st.error("❌ Formato inválido. Asegúrate de que las columnas del archivo sigan estrictamente las instrucciones de la barra lateral.")
