@@ -174,7 +174,7 @@ if uploaded_file:
                         delta_h_real = abs(z_max_tramo - z_min_tramo)
                         
                         # FILTRO FÍSICO: Solo proponer válvula si el desnivel real supera el umbral de cavitación/colapso
-                        if delta_h_real > UBRAL_DELTA_H_CRITICO:
+                        if delta_h_real > UMBRAL_DELTA_H_CRITICO:
                             idx_centro = data_grupo.index[len(data_grupo) // 2]
                             df.loc[idx_centro, 'valvula_anticolapso'] = True
 
@@ -277,7 +277,7 @@ if uploaded_file:
 else:
     st.info("👈 Por favor, ingresa tu archivo de perfil (.csv o .xlsx) y configura las variables en el menú lateral para iniciar el análisis hidráulico.")
 
-# 6. BIBLIOGRAFÍA DE RESPALDO INSTITUCIONAL (CON EL ARTÍCULO ADJUNTO DE HOHAI UNIVERSITY)
+# 6. BIBLIOGRAFÍA DE RESPALDO INSTITUCIONAL
 st.markdown("""
 <div class="discreet-note">
     <strong>Fuentes técnicas e institucionales de referencia:</strong><br>
