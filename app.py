@@ -43,7 +43,6 @@ st.markdown("""
     }
 
     /* ---- OCULTAR TODO EL CONTENEDOR INTERNO DE ARCHIVOS DE STREAMLIT ---- */
-    /* Cuando ya hay un archivo subido, borramos absolutamente todo el bloque interno redundante */
     .file-uploaded-active [data-testid="stFileUploaderDropzone"] div {
         display: none !important;
     }
@@ -72,22 +71,18 @@ uploaded_file = st.sidebar.file_uploader(
 
 # LÓGICA DE INTERFAZ 100% CONTROLADA POR PYTHON:
 if uploaded_file is not None:
-    # Agregamos una clase contenedora ficticia mediante HTML inyectado para activar las reglas CSS drásticas
     st.markdown("<div class='file-uploaded-active'></div>", unsafe_allow_html=True)
     
-    # Creamos un botón nativo estilizado en la barra lateral justo abajo para reiniciar el análisis
     if st.sidebar.button("🔄 Carga un archivo diferente", use_container_width=True):
-        # Al hacer clic, cambiamos la clave del componente para destruir el estado interno de Streamlit por completo
         st.session_state["uploader_key"] = f"file_uploader_{np.random.randint(1000, 9999)}"
         st.rerun()
 
 st.sidebar.markdown("---")
 
-# B. Entradas numéricas abajo de la carga (Campos de texto limpios sin botones + / -)
+# B. Entradas numéricas abajo de la carga
 q_input = st.sidebar.text_input("Caudal (m³/s)", value="0.075")
 d_input = st.sidebar.text_input("Diámetro Interno (m)", value="0.305")
 
-# Conversión segura de cadenas a flotantes para evitar quiebres en ejecución
 try:
     q_m3s = float(q_input) if q_input else 0.000
     d_m = float(d_input) if d_input else 0.010
@@ -130,38 +125,52 @@ if uploaded_file:
         if col_x and col_z:
             g = 9.81
             
-            # Alerta preventiva por criterios de capilaridad (Zukoski)
+            # Asegurar ordenamiento físico por distancia
+            df[col_x] = pd.to_numeric(df[col_x])
+            df[col_z] = pd.to_numeric(df[col_z])
+            df = df.sort_values(by=col_x).reset_index(drop=True)
+
             if d_m < 0.100:
                 st.warning("⚠️ **Nota técnica:** El diámetro ingresado es menor a 100 mm (4 pulgadas). En tuberías pequeñas, los efectos de tensión superficial y capilaridad pueden alterar el comportamiento del aire respecto al modelo matemático de arrastre hidráulico por gravedad.")
 
-            # ---- MOTOR DE CÁLCULO CORREGIDO: METODOLOGÍA GRAFICA II-UNAM [Q²/(g*D⁵)] ----
-            # 1. Parámetro de Gasto Adimensional al cuadrado del sistema real
+            # ---- MOTOR DE CÁLCULO: METODOLOGÍA GRAFICA II-UNAM [Q²/(g*D⁵)] ----
             parametro_sistema_sq = (q_m3s**2) / (g * (d_m**5)) if d_m > 0 else 0
             
-            # 2. Análisis geométrico de picos (Crestas locales de acumulación por flotación)
             df['es_cresta'] = (df[col_z] > df[col_z].shift(1)) & (df[col_z] > df[col_z].shift(-1))
             
-            # 3. Análisis cinemático de diferenciales por tramo
             df['dx'] = df[col_x].diff()
             df['dz'] = df[col_z].diff()
-            
-            # Pendiente geométrica S (Definida positiva para tramos descendentes en el manual de la UNAM)
             df['S'] = -df['dz'] / df['dx'].replace(0, np.nan)
             
-            # 4. Evaluación de la Capacidad de Arrastre (Ecuación de la Recta UNAM: Parametro_critico = 0.35 * S + 0.18)
             df['parametro_critico'] = np.where(df['S'] > 0, 0.35 * df['S'].fillna(0) + 0.18, 0.0)
             df['riesgo_hidraulico'] = (df['S'] > 0) & (parametro_sistema_sq < df['parametro_critico'])
             
-            # Velocidad Crítica límite despejada desde la relación cuadrática de la gráfica
             df['v_critica'] = np.where(
                 df['S'] > 0,
                 (4 / np.pi) * np.sqrt((0.35 * df['S'].fillna(0) + 0.18) * g * d_m),
                 0.0
             )
             
-            # Velocidad cinemática real en el conducto
             area = np.pi * (d_m**2) / 4 if d_m > 0 else 1
             v_real = q_m3s / area
+
+            # ---- PROPUESTA DE VÁLVULA INTERMEDIA EN TRAMOS CONTINUOS CRÍTICOS ----
+            df['valvula_anticolapso'] = False
+            
+            # Crear bloques contiguos mediante cambios de estado consecutivos de la condición booleana de riesgo
+            df['grupo_riesgo'] = (df['riesgo_hidraulico'] != df['riesgo_hidraulico'].shift()).cumsum()
+            df_sub_riesgo = df[df['riesgo_hidraulico']]
+            
+            if not df_sub_riesgo.empty:
+                for grupo_id, data_grupo in df_sub_riesgo.groupby('grupo_riesgo'):
+                    idx_inicio = data_grupo.index[0]
+                    idx_fin = data_grupo.index[-1]
+                    
+                    # Si es un tramo completo continuo (más de un punto en riesgo)
+                    if idx_inicio < idx_fin:
+                        # Identificar el punto medio/central exacto de la lista de índices del tramo
+                        idx_centro = data_grupo.index[len(data_grupo) // 2]
+                        df.loc[idx_centro, 'valvula_anticolapso'] = True
 
             # 4. COMPONENTE GRÁFICO (MÁXIMA AMPLITUD HORIZONTAL)
             st.subheader("Perfil Longitudinal del Acueducto")
@@ -175,7 +184,7 @@ if uploaded_file:
                 line=dict(color='#1E40AF', width=2.5)
             ))
 
-            # Marcadores geométricos de Puntos Altos (Simbología exacta solicitada)
+            # Marcadores geométricos de Puntos Altos
             crestas = df[df['es_cresta']]
             fig.add_trace(go.Scatter(
                 x=crestas[col_x], y=crestas[col_z], 
@@ -196,6 +205,16 @@ if uploaded_file:
                         showlegend=(i == df['riesgo_hidraulico'].idxmax())
                     ))
 
+            # Añadir las válvulas intermedias propuestas en la gráfica (Cuadrado fucsia, tamaño 5)
+            valvulas_activas = df[df['valvula_anticolapso']]
+            if not valvulas_activas.empty:
+                fig.add_trace(go.Scatter(
+                    x=valvulas_activas[col_x], y=valvulas_activas[col_z],
+                    mode='markers',
+                    marker=dict(color='#D946EF', size=5, symbol='square', line=dict(color='black', width=0.5)),
+                    name='Válvula de aire intermedia para evitar colapso'
+                ))
+
             # Layout optimizado: Forzado de leyendas al eje inferior (y=-0.18) para liberar la horizontal
             fig.update_layout(
                 xaxis_title="Distancia (m)", 
@@ -215,14 +234,22 @@ if uploaded_file:
 
             # 5. MATRIZ DE RESULTADOS / REPORTES
             st.subheader("Reporte General de Puntos Críticos")
-            res_table = df[(df['es_cresta']) | (df['riesgo_hidraulico'])].copy()
+            res_table = df[(df['es_cresta']) | (df['riesgo_hidraulico']) | (df['valvula_anticolapso'])].copy()
             
             if not res_table.empty:
-                res_table['Diagnóstico del Aire'] = np.where(
-                    res_table['es_cresta'], 
-                    "Punto Alto Geométrico (Bolsa Permanente)", 
+                # Jerarquía condicional para asignar el diagnóstico correcto
+                condiciones = [
+                    res_table['valvula_anticolapso'],
+                    res_table['es_cresta'],
+                    res_table['riesgo_hidraulico']
+                ]
+                elecciones = [
+                    "Válvula de aire intermedia para evitar colapso",
+                    "Punto Alto Geométrico (Bolsa Permanente)",
                     "Aire Estacionario (Falta de Arrastre en Pendiente)"
-                )
+                ]
+                res_table['Diagnóstico del Aire'] = np.select(condiciones, elecciones, default="Tramo Singular")
+
                 res_table['V. Flujo (m/s)'] = round(v_real, 3)
                 res_table['V. Mínima Barrido (m/s)'] = np.where(res_table['S'] > 0, round(res_table['v_critica'], 3), 0.000)
                 res_table['Pendiente (S)'] = round(res_table['S'].fillna(0), 4)
@@ -249,6 +276,7 @@ st.markdown("""
 <div class="discreet-note">
     <strong>Fuentes técnicas e institucionales de referencia:</strong><br>
     • Instituto de Ingeniería, UNAM. <em>Manual de análisis de la problemática del aire atrapado en acueductos, para mejorar su eficiencia.</em> Serie Manuales, México.<br>
+    • Wang, Y., Zhang, J., et al. (2023). <em>Air valve arrangement criteria for preventing secondary pipe bursts in long-distance gravitational water supply systems.</em> AQUA - Water Infrastructure, Ecosystems and Society, Vol 72 No 8, 1566. IWA Publishing.<br>
     • Kalinske, A. A., & Bliss, P. H. (1943). <em>Removal of air from pipe lines by flowing water.</em> Civil Engineering, 13(10).<br>
     • Zukoski, E. E. (1966). <em>Influence of viscosity, surface tension and inclination on motion of long bubbles in closed tubes.</em> Journal of Fluid Mechanics.
 </div>
