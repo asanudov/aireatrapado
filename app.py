@@ -203,7 +203,7 @@ if uploaded_file:
 
                 texto_conclusion = (
                     f"El análisis del perfil del acueducto '{nombre_acueducto}' (D={d_m:.3f} m) "
-                    f"se ha realizado bajo criterios técnicos de la **AWWA**, UNAM, **CONAGUA** "
+                    f"se ha realizado bajo criterios técnicos de la AWWA, UNAM, CONAGUA "
                     f"y recomendaciones técnicas con base en 50 años de experiencia que nos respaldan como fabricantes de válvulas de aire.\n\n"
                     f"**Resultados del análisis:**\n"
                     f"- **Puntos Altos:** Se detectaron {total_crestas} punto(s) alto(s) geométrico(s) principales, donde es mandatoria la instalación de válvulas de admisión/expulsión.\n"
