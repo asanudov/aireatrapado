@@ -73,4 +73,53 @@ if uploaded_file:
         col_x = next((c for c in df.columns if c in ['cadenamiento', 'distancia', 'x']), None)
         col_z = next((c for c in df.columns if c in ['elevación', 'elevacion', 'y']), None)
 
-        if col_x and
+        if col_x and col_z:
+            df = df.sort_values(by=col_x).reset_index(drop=True)
+            g = 9.81
+            
+            # FILTRO TOPOGRÁFICO: Prominencia > Diámetro (Criterio estricto)
+            picos_idx, _ = find_peaks(df[col_z], prominence=d_m)
+            df['es_cresta'] = False
+            df.loc[picos_idx, 'es_cresta'] = True
+
+            # CÁLCULOS HIDRÁULICOS
+            df['dx'] = df[col_x].diff()
+            df['dz'] = df[col_z].diff()
+            df['S'] = -df['dz'] / df['dx'].replace(0, np.nan)
+            
+            parametro_sistema_sq = (q_m3s**2) / (g * (d_m**5))
+            df['parametro_critico'] = np.where(df['S'] > 0, 0.35 * df['S'].fillna(0) + 0.18, 0.0)
+            df['riesgo_hidraulico'] = (df['S'] > 0) & (parametro_sistema_sq < df['parametro_critico'])
+            
+            # --- CORRECCIÓN ROBUSTA PARA KEYERROR ---
+            df['grupo_riesgo'] = (df['riesgo_hidraulico'] != df['riesgo_hidraulico'].shift()).cumsum()
+            df_sub_riesgo = df[df['riesgo_hidraulico']].copy()
+            
+            df['valvula_anticolapso'] = False
+            UMBRAL_DELTA_H = 10.8
+            
+            if not df_sub_riesgo.empty:
+                for grupo_id, data_grupo in df_sub_riesgo.groupby('grupo_riesgo'):
+                    if abs(data_grupo[col_z].max() - data_grupo[col_z].min()) > UMBRAL_DELTA_H:
+                        idx_centro = data_grupo.index[len(data_grupo) // 2]
+                        df.loc[idx_centro, 'valvula_anticolapso'] = True
+
+            # GRÁFICA
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(x=df[col_x], y=df[col_z], mode='lines', name='Perfil'))
+            fig.add_trace(go.Scatter(x=df[df['es_cresta']][col_x], y=df[df['es_cresta']][col_z], mode='markers', name='Crestas'))
+            st.plotly_chart(fig, use_container_width=True)
+
+            # TABLA
+            res_table = df[(df['es_cresta']) | (df['valvula_anticolapso'])].copy()
+            st.dataframe(res_table[[col_x, col_z, 'es_cresta', 'valvula_anticolapso']])
+            
+            if st.button("Generar Reporte PDF"):
+                st.info("Función de PDF lista para integrar.")
+        else:
+            st.error("No se encontraron columnas válidas 'x' o 'y'.")
+            
+    except Exception as e:
+        st.error(f"Error procesando archivo: {e}")
+else:
+    st.info("👈 Por favor, carga un archivo para comenzar.")
