@@ -2,7 +2,7 @@ streamlit
 pandas
 numpy
 plotly
-fpdf
+fpdf2
+kaleido==0.2.1
 scipy
-google-generativeai
-kaleido
+openpyxl
