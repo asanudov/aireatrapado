@@ -7,7 +7,7 @@ from fpdf import FPDF
 import os
 from scipy.signal import find_peaks
 
-# 1. CONFIGURACIÓN DE PÁGINA Y ESTILOS
+# 1. CONFIGURACIÓN DE PÁGINA
 st.set_page_config(page_title="Analizador de Aire Atrapado", layout="wide")
 
 st.markdown("""
@@ -36,13 +36,14 @@ st.sidebar.title("Configuración")
 # Selector de archivos
 uploaded_file = st.sidebar.file_uploader("Carga tu perfil en Excel o CSV", type=["xlsx", "csv"])
 
-# NOTA SOLICITADA: Instrucciones del CSV
+# --- NOTA SOBRE EL FORMATO (SOLICITUD INTEGRADA) ---
 st.sidebar.markdown("""
-<div style="background-color: #f0f2f6; padding: 10px; border-radius: 5px; font-size: 0.85rem;">
-    <strong>Formato CSV requerido:</strong><br>
-    - Encabezados obligatorios: <code>x</code> (distancia), <code>y</code> (elevación).<br>
-    - Separador decimal: Punto (.).<br>
-    - Orden: Distancia creciente.
+<div style="background-color: #eef2f7; padding: 12px; border-radius: 5px; font-size: 0.85rem; border: 1px solid #d1d9e6;">
+    <strong>ℹ️ Instrucciones del archivo:</strong><br>
+    Tu archivo debe tener dos columnas:<br>
+    1. <code>x</code>: Distancia (cadenamiento).<br>
+    2. <code>y</code>: Elevación (cota).<br><br>
+    * Asegúrate de usar punto (.) como separador decimal.
 </div>
 """, unsafe_allow_html=True)
 
@@ -61,65 +62,15 @@ except:
 st.title("Analizador de Aire Atrapado")
 
 if uploaded_file:
-    # Cargar datos
-    if uploaded_file.name.endswith('.csv'):
-        df = pd.read_csv(uploaded_file)
-    else:
-        df = pd.read_excel(uploaded_file)
-    
-    df.columns = [c.lower().strip() for c in df.columns]
-    col_x, col_z = 'x', 'y' # Asumiendo estandarización por el usuario
-
-    if col_x in df.columns and col_z in df.columns:
-        df = df.sort_values(by=col_x).reset_index(drop=True)
-        g = 9.81
+    try:
+        if uploaded_file.name.endswith('.csv'):
+            df = pd.read_csv(uploaded_file)
+        else:
+            df = pd.read_excel(uploaded_file)
         
-        # FILTRO TOPOGRÁFICO (Prominencia > Diámetro)
-        picos_idx, _ = find_peaks(df[col_z], prominence=d_m)
-        df['es_cresta'] = False
-        df.loc[picos_idx, 'es_cresta'] = True
+        df.columns = [c.lower().strip() for c in df.columns]
+        # Identificar columnas automáticamente
+        col_x = next((c for c in df.columns if c in ['cadenamiento', 'distancia', 'x']), None)
+        col_z = next((c for c in df.columns if c in ['elevación', 'elevacion', 'y']), None)
 
-        # CÁLCULOS HIDRÁULICOS
-        df['dx'] = df[col_x].diff()
-        df['dz'] = df[col_z].diff()
-        df['S'] = -df['dz'] / df['dx'].replace(0, np.nan)
-        
-        parametro_sistema_sq = (q_m3s**2) / (g * (d_m**5))
-        df['parametro_critico'] = np.where(df['S'] > 0, 0.35 * df['S'].fillna(0) + 0.18, 0.0)
-        df['riesgo_hidraulico'] = (df['S'] > 0) & (parametro_sistema_sq < df['parametro_critico'])
-        
-        # Filtro de válvulas adicionales (Hohai)
-        df['valvula_anticolapso'] = False
-        df_sub_riesgo = df[df['riesgo_hidraulico']]
-        UMBRAL_DELTA_H = 10.8
-        
-        if not df_sub_riesgo.empty:
-            # Agrupamos tramos continuos de riesgo
-            df['grupo_riesgo'] = (df['riesgo_hidraulico'] != df['riesgo_hidraulico'].shift()).cumsum()
-            for _, data_grupo in df_sub_riesgo.groupby('grupo_riesgo'):
-                if abs(data_grupo[col_z].max() - data_grupo[col_z].min()) > UMBRAL_DELTA_H:
-                    df.loc[data_grupo.index[len(data_grupo)//2], 'valvula_anticolapso'] = True
-
-        # GRÁFICA
-        fig = go.Figure()
-        fig.add_trace(go.Scatter(x=df[col_x], y=df[col_z], mode='lines', name='Perfil'))
-        fig.add_trace(go.Scatter(x=df[df['es_cresta']][col_x], y=df[df['es_cresta']][col_z], mode='markers', name='Crestas'))
-        st.plotly_chart(fig, use_container_width=True)
-
-        # TABLA
-        res_table = df[(df['es_cresta']) | (df['valvula_anticolapso'])].copy()
-        st.dataframe(res_table[[col_x, col_z, 'es_cresta', 'valvula_anticolapso']])
-        
-        # BOTÓN PDF
-        if st.button("Generar Reporte PDF"):
-            pdf = ReportePDF()
-            pdf.add_page()
-            pdf.set_font("Arial", 'B', 16)
-            pdf.cell(0, 10, f"Reporte: {nombre_acueducto}", ln=True)
-            pdf.set_font("Arial", '', 12)
-            pdf.cell(0, 10, f"Diametro: {d_m} m | Caudal: {q_m3s} m3/s", ln=True)
-            pdf.output("reporte.pdf")
-            st.success("PDF generado.")
-
-else:
-    st.info("Carga un archivo para comenzar.")
+        if col_x and
