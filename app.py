@@ -6,38 +6,6 @@ from datetime import datetime
 from fpdf import FPDF
 import os
 from scipy.signal import find_peaks
-import google.generativeai as genai
-
-# --- CONFIGURACIÓN IA ---
-try:
-    genai.configure(api_key=st.secrets["GOOGLE_API_KEY"])
-    model = genai.GenerativeModel('gemini-1.5-flash')
-except:
-    pass
-
-def generar_conclusion_ia(nombre, q, d, longitud, total_crestas, total_intermedias, v_real, umbral_h):
-    prompt = f"""
-    Eres un Ingeniero Hidráulico experto. Redacta una conclusión técnica profesional, 
-    concisa y objetiva para un reporte de aire en acueductos.
-    
-    Datos:
-    - Acueducto: {nombre}
-    - Caudal: {q} m3/s, Diámetro: {d} m, Longitud: {longitud} m
-    - Puntos altos detectados: {total_crestas}
-    - Válvulas intermedias requeridas: {total_intermedias}
-    - Velocidad real: {v_real} m/s
-    - Umbral crítico Delta H: {umbral_h} m
-    
-    Instrucciones:
-    - Si total_intermedias > 0, explica el riesgo de colapso secundario.
-    - Si total_intermedias == 0, resalta la estabilidad del sistema.
-    - Tono formal y técnico. Máximo 120 palabras.
-    """
-    try:
-        response = model.generate_content(prompt)
-        return response.text
-    except:
-        return "El análisis hidráulico se realizó bajo criterios AWWA y CONAGUA. Se detectaron los puntos altos y riesgos de descompresión presentados en la tabla superior, requiriendo las acciones correctivas descritas."
 
 # 1. CONFIGURACIÓN DE PÁGINA Y ESTILOS BASE
 st.set_page_config(page_title="Analizador de Aire Atrapado", layout="wide")
@@ -64,7 +32,7 @@ st.markdown("""
 # CLASE GENERADORA DE PDF CON BANDA AZUL DE CONTRASTE PARA EL LOGO
 class ReportePDF(FPDF):
     def header(self):
-        self.set_fill_color(30, 58, 138) 
+        self.set_fill_color(30, 58, 138) # Azul Oscuro de Aquestia
         self.rect(0, 0, 210, 32, "F")
         
         if os.path.exists("logo.png"):
@@ -219,16 +187,30 @@ if uploaded_file:
                 
                 st.dataframe(res_table_renamed[output_cols], use_container_width=True, hide_index=True)
                 
-                # ---- CONCLUSIÓN GENERAL (INTEGRACIÓN IA) ----
+                # ---- CONCLUSIÓN GENERAL DINÁMICA (INTELIGENTE) ----
                 st.subheader("Conclusión General del Sistema")
                 total_crestas = len(crestas)
                 total_intermedias = len(valvulas_activas)
                 
-                with st.spinner("La IA está redactando la conclusión..."):
-                    texto_conclusion = generar_conclusion_ia(
-                        nombre_acueducto, q_m3s, d_m, longitud_total, 
-                        total_crestas, total_intermedias, v_real, UMBRAL_DELTA_H_CRITICO
-                    )
+                # Variables dinámicas para el texto
+                if total_intermedias > 0:
+                    cadenamientos_criticos = ", ".join([f"{row[col_x]:.1f}" for _, row in valvulas_activas.iterrows()])
+                    hohai_status = f"Se identificaron {total_intermedias} punto(s) crítico(s) que superan el umbral de descompresión de {UMBRAL_DELTA_H_CRITICO} m."
+                    hohai_accion = f"En los cadenamientos [{cadenamientos_criticos}] m, es necesaria la instalación de una válvula intermedia para mitigar el riesgo de colapso secundario."
+                else:
+                    hohai_status = f"No se detectaron tramos que superen el umbral crítico de descompresión ({UMBRAL_DELTA_H_CRITICO} m)."
+                    hohai_accion = "El sistema presenta estabilidad ante el riesgo de colapso por descompresión en los puntos analizados."
+
+                texto_conclusion = (
+                    f"El análisis del perfil del acueducto '{nombre_acueducto}' (D={d_m:.3f} m) "
+                    f"se ha realizado bajo criterios técnicos de la **AWWA**, UNAM, **CONAGUA** "
+                    f"y recomendaciones técnicas con base en 50 años de experiencia que nos respaldan como fabricantes de válvulas de aire.\n\n"
+                    f"**Resultados del análisis:**\n"
+                    f"- **Puntos Altos:** Se detectaron {total_crestas} punto(s) alto(s) geométrico(s) principales, donde es mandatoria la instalación de válvulas de admisión/expulsión.\n"
+                    f"- **Criterio Cinético (UNAM):** La velocidad de operación de {v_real:.3f} m/s es comparada contra la velocidad mínima de barrido requerida.\n"
+                    f"- **Criterio de Descompresión (Hohai):** {hohai_status} {hohai_accion}"
+                )
+                
                 st.write(texto_conclusion)
 
                 # =========================================================
@@ -308,7 +290,7 @@ if uploaded_file:
                         
                         pdf.ln(6)
                         
-                        # Conclusiones IA
+                        # Conclusiones Generales Modificadas
                         pdf.set_font("Arial", "B", 11)
                         pdf.set_text_color(30, 58, 138)
                         pdf.cell(0, 7, " 4. Conclusiones y Recomendaciones Tecnicas", ln=1, fill=True)
