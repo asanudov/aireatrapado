@@ -194,7 +194,7 @@ if uploaded_file:
                 tramos_detallados = "\n".join([f"• {t}" for t in lista_tramos_criticos]) if lista_tramos_criticos else "Ninguno identificado."
                 
                 texto_conclusion = (
-                    f"El análisis del acueducto '{nombre_acueducto}' se fundamenta en los criterios de diseño hidráulico de la AWWA, normativas CONAGUA "
+                    f"El análisis del acueducto '{nombre_acueducto}' se fundamenta en los criterios de diseño de la AWWA M51, Manual de Aire Atrapado de la UNAM, normativas CONAGUA "
                     f"y más de 40 años de experiencia técnica como fabricantes en sistemas de protección contra aire atrapado.\n\n"
                     f"Resultados:\n"
                     f"- Se han detectado {len(crestas)} puntos altos geométricos mediante filtro de prominencia, donde es mandatoria la instalación de válvulas de admisión/expulsión.\n"
