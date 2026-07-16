@@ -5,7 +5,7 @@ import plotly.graph_objects as go
 from datetime import datetime
 from fpdf import FPDF
 import os
-from scipy.signal import find_peaks # <--- ÚNICO AGREGADO EN IMPORTS
+from scipy.signal import find_peaks
 
 # 1. CONFIGURACIÓN DE PÁGINA Y ESTILOS BASE
 st.set_page_config(page_title="Analizador de Aire Atrapado", layout="wide")
@@ -32,11 +32,13 @@ st.markdown("""
 # CLASE GENERADORA DE PDF CON BANDA AZUL DE CONTRASTE PARA EL LOGO
 class ReportePDF(FPDF):
     def header(self):
-        self.set_fill_color(30, 58, 138) 
+        self.set_fill_color(30, 58, 138) # Azul Oscuro de Aquestia
         self.rect(0, 0, 210, 32, "F")
+        
         if os.path.exists("logo.png"):
             self.image("logo.png", x=12, y=6, w=48)
-        self.ln(24) 
+        
+        self.ln(24)
 
     def footer(self):
         self.set_y(-20)
@@ -44,6 +46,7 @@ class ReportePDF(FPDF):
         self.set_line_width(0.5)
         self.line(12, self.get_y(), 198, self.get_y())
         self.ln(3)
+        
         self.set_font("Arial", "I", 8)
         self.set_text_color(120, 120, 120)
         fecha_hoy = datetime.now().strftime("%d/%m/%Y")
@@ -58,12 +61,12 @@ if "uploader_key" not in st.session_state:
 
 uploaded_file = st.sidebar.file_uploader("Carga tu perfil en Excel o CSV", type=["xlsx", "csv"], key=st.session_state["uploader_key"])
 
-# --- NOTA SOLICITADA ---
 st.sidebar.markdown("""
 <div style="background-color: #f0f2f6; padding: 10px; border-radius: 5px; font-size: 0.8rem; border: 1px solid #d1d9e6;">
-    <strong>ℹ️ Instrucciones:</strong><br>
-    - Encabezados: <code>x</code> (distancia), <code>y</code> (elevación).<br>
-    - Separador: Coma (,). Decimal: Punto (.).
+    <strong>ℹ️ Instrucciones del CSV:</strong><br>
+    - Columnas: <code>x</code> (distancia), <code>y</code> (elevación).<br>
+    - Separador: Coma (,).<br>
+    - Decimal: Punto (.).
 </div>
 """, unsafe_allow_html=True)
 
@@ -116,7 +119,6 @@ if uploaded_file:
             # CÁLCULOS HIDRÁULICOS
             parametro_sistema_sq = (q_m3s**2) / (g * (d_m**5)) if d_m > 0 else 0
             
-            # --- LÓGICA DE CRESTAS SOLICITADA ---
             picos_idx, _ = find_peaks(df[col_z], prominence=d_m)
             df['es_cresta'] = False
             df.loc[picos_idx, 'es_cresta'] = True
@@ -138,8 +140,6 @@ if uploaded_file:
             df_sub_riesgo = df[df['riesgo_hidraulico']]
             UMBRAL_DELTA_H_CRITICO = 10.8
 
-            # Generar lista de segmentos críticos para la conclusión
-            lista_tramos_criticos = []
             if not df_sub_riesgo.empty:
                 for grupo_id, data_grupo in df_sub_riesgo.groupby('grupo_riesgo'):
                     if data_grupo.index[0] < data_grupo.index[-1]:
@@ -147,7 +147,6 @@ if uploaded_file:
                         if delta_h_real > UMBRAL_DELTA_H_CRITICO:
                             idx_centro = data_grupo.index[len(data_grupo) // 2]
                             df.loc[idx_centro, 'valvula_anticolapso'] = True
-                        lista_tramos_criticos.append(f"Cadenamiento {data_grupo[col_x].min():.1f}m a {data_grupo[col_x].max():.1f}m")
 
             # GRÁFICO PLOTLY
             st.subheader("Perfil Longitudinal del Acueducto")
@@ -188,35 +187,152 @@ if uploaded_file:
                 
                 st.dataframe(res_table_renamed[output_cols], use_container_width=True, hide_index=True)
                 
-                # ---- CONCLUSIÓN DINÁMICA (LLM ESTILO) ----
+                # ---- CONCLUSIÓN GENERAL DINÁMICA (INTELIGENTE) ----
                 st.subheader("Conclusión General del Sistema")
+                total_crestas = len(crestas)
+                total_intermedias = len(valvulas_activas)
                 
-                tramos_detallados = "\n".join([f"• {t}" for t in lista_tramos_criticos]) if lista_tramos_criticos else "Ninguno identificado."
-                
-                texto_conclusion = (
-                    f"El análisis del acueducto '{nombre_acueducto}' se fundamenta en los criterios de diseño de la AWWA M51, Manual de Aire Atrapado de la UNAM, normativas CONAGUA "
-                    f"y más de 40 años de experiencia técnica como fabricantes en sistemas de protección contra aire atrapado.\n\n"
-                    f"Resultados:\n"
-                    f"- Se han detectado {len(crestas)} puntos altos geométricos mediante filtro de prominencia, donde es mandatoria la instalación de válvulas de admisión/expulsión.\n"
-                    f"- Con respecto a los tramos de pendiente descendente crítica evaluados mediante el criterio cinético de la UNAM, se identificó riesgo latente de bolsas de aire atrapadas "
-                    f"debido a que la velocidad real ({v_real:.3f} m/s) es inferior a la velocidad mínima de barrido. Los tramos específicos que requieren revisión son:\n{tramos_detallados}\n\n"
-                    f"- Aplicando el filtro de deformación por descompresión de Hohai University, los tramos que superan el umbral de {UMBRAL_DELTA_H_CRITICO} m requieren la instalación "
-                    f"estricta de una válvula de aire intermedia para mitigar el riesgo de colapso secundario."
+                texto_base = (
+                    f"El análisis del perfil del acueducto '{nombre_acueducto}' (D={d_m:.3f} m) "
+                    f"se ha realizado bajo criterios técnicos internacionales de la **AWWA**, normativas **CONAGUA** "
+                    f"y los criterios de diseño vigentes.\n\n"
+                    f"**Resultados del análisis:**\n"
+                    f"- **Puntos Altos:** Se detectaron {total_crestas} punto(s) alto(s) geométrico(s) principales, donde es mandatoria la instalación de válvulas de admisión/expulsión.\n"
+                    f"- **Criterio Cinético (UNAM):** La velocidad de operación de {v_real:.3f} m/s es comparada contra la velocidad mínima de barrido requerida.\n"
                 )
+
+                if total_intermedias > 0:
+                    cadenamientos_criticos = ", ".join([f"{row[col_x]:.1f}" for _, row in valvulas_activas.iterrows()])
+                    texto_intermedio = (
+                        f"- **Criterio de Descompresión (Hohai):** Se identificaron {total_intermedias} punto(s) crítico(s) que superan el umbral de descompresión de {UMBRAL_DELTA_H_CRITICO} m. "
+                        f"En los cadenamientos [{cadenamientos_criticos}] m, es necesaria la instalación de una válvula intermedia para mitigar el riesgo de colapso secundario."
+                    )
+                else:
+                    texto_intermedio = (
+                        f"- **Criterio de Descompresión (Hohai):** No se detectaron tramos que superen el umbral crítico de descompresión ({UMBRAL_DELTA_H_CRITICO} m), por lo que el sistema presenta estabilidad ante el riesgo de colapso por descompresión en los puntos analizados."
+                    )
+                
+                texto_conclusion = texto_base + texto_intermedio
                 st.write(texto_conclusion)
 
                 # =========================================================
-                # PDF (MANTIENE ESTRUCTURA ANTERIOR PERO USA NUEVA CONCLUSIÓN)
+                # COMPILACIÓN DEL PDF AJUSTADO
                 # =========================================================
                 st.markdown("---")
                 if st.button("📄 Generar y Descargar Reporte PDF Institucional", use_container_width=True):
-                    # ... [PDF generation logic remains exactly as per your original code] ...
-                    # (Asegúrate de que la variable 'texto_conclusion' definida arriba se pase al reporte)
-                    st.success("PDF generado exitosamente.") 
+                    with st.spinner("Compilando reporte vectorial..."):
+                        fig.update_layout(height=400, width=800)
+                        fig.write_image("temp_perfil.png", engine="kaleido")
+                        
+                        pdf = ReportePDF(orientation='P', unit='mm', format='A4')
+                        pdf.set_margins(12, 12, 12)
+                        pdf.add_page()
+                        
+                        pdf.set_font("Arial", "B", 14)
+                        pdf.set_text_color(40, 40, 40)
+                        pdf.cell(0, 10, "REPORTE DE DIMENSIONAMIENTO Y DISPOSITIVOS DE AIRE", ln=1)
+                        pdf.ln(2)
+                        
+                        # Datos de Entrada Generales
+                        pdf.set_font("Arial", "B", 11)
+                        pdf.set_fill_color(240, 243, 248) 
+                        pdf.set_text_color(30, 58, 138)
+                        pdf.cell(0, 7, " 1. Parametros Generales de Diseno", ln=1, fill=True)
+                        pdf.ln(2)
+                        
+                        pdf.set_font("Arial", "", 10)
+                        pdf.set_text_color(50, 50, 50)
+                        pdf.cell(60, 6, "Nombre del Sistema / Acueducto:", border="B")
+                        pdf.cell(100, 6, f"{nombre_acueducto}", border="B", ln=1)
+                        pdf.cell(60, 6, "Longitud total de conduccion:", border="B")
+                        pdf.cell(100, 6, f"{longitud_total:.1f} m", border="B", ln=1)
+                        pdf.cell(60, 6, "Caudal de diseno (Q):", border="B")
+                        pdf.cell(100, 6, f"{q_m3s:.3f} m3/s", border="B", ln=1)
+                        pdf.cell(60, 6, "Diametro interno de conduccion (D):", border="B")
+                        pdf.cell(100, 6, f"{d_m:.3f} m", border="B", ln=1)
+                        pdf.cell(60, 6, "Velocidad media del flujo:", border="B")
+                        pdf.cell(100, 6, f"{v_real:.3f} m/s", border="B", ln=1)
+                        pdf.ln(6)
+                        
+                        # Gráfico del Perfil
+                        pdf.set_font("Arial", "B", 11)
+                        pdf.cell(0, 7, " 2. Perfil Longitudinal y Ubicacion de Dispositivos", ln=1, fill=True)
+                        pdf.ln(2)
+                        if os.path.exists("temp_perfil.png"):
+                            pdf.image("temp_perfil.png", x=15, w=180)
+                            pdf.ln(5)
+                        
+                        # Tabla Resumen Física
+                        pdf.set_font("Arial", "B", 11)
+                        pdf.cell(0, 7, " 3. Tabla Resumen de Dispositivos de Aire Propuestos", ln=1, fill=True)
+                        pdf.ln(3)
+                        
+                        pdf.set_font("Arial", "B", 8.5)
+                        pdf.set_text_color(255, 255, 255)
+                        pdf.set_fill_color(30, 58, 138) 
+                        
+                        headers = ["No.", "Dist. (m)", "Elev. (m)", "Pend. (S)", "Diagnostico", "V. Real", "V. Barrido"]
+                        widths = [10, 20, 20, 20, 68, 22, 22]
+                        
+                        for h, w in zip(headers, widths):
+                            pdf.cell(w, 7, h, border=1, align="C", fill=True)
+                        pdf.ln()
+                        
+                        pdf.set_font("Arial", "", 8)
+                        pdf.set_text_color(50, 50, 50)
+                        
+                        for _, row in res_table_renamed.iterrows():
+                            pdf.cell(10, 6, str(int(row['No. de Válvula'])), border=1, align="C")
+                            pdf.cell(20, 6, f"{row['Distancia (m)']:.1f}", border=1, align="R")
+                            pdf.cell(20, 6, f"{row['Elevación (m)']:.2f}", border=1, align="R")
+                            pdf.cell(20, 6, f"{row['Pendiente (S)']:.4f}", border=1, align="R")
+                            pdf.cell(68, 6, f" {row['Diagnóstico del Aire']}", border=1, align="L")
+                            pdf.cell(22, 6, f"{row['V. Flujo (m/s)']:.2f}", border=1, align="C")
+                            pdf.cell(22, 6, f"{row['V. Mínima Barrido (m/s)']:.2f}", border=1, align="C", ln=1)
+                        
+                        pdf.ln(6)
+                        
+                        # Conclusiones Generales Modificadas
+                        pdf.set_font("Arial", "B", 11)
+                        pdf.set_text_color(30, 58, 138)
+                        pdf.cell(0, 7, " 4. Conclusiones y Recomendaciones Tecnicas", ln=1, fill=True)
+                        pdf.ln(2)
+                        pdf.set_font("Arial", "", 9.5)
+                        pdf.set_text_color(40, 40, 40)
+                        pdf.multi_cell(0, 5, texto_conclusion)
+                        
+                        pdf_filename = f"Reporte_Valvulas_Aire_{datetime.now().strftime('%Y%m%d')}.pdf"
+                        pdf.output(pdf_filename)
+                        
+                        with open(pdf_filename, "rb") as f:
+                            st.download_button(
+                                label="💾 ¡PDF Listo! Da clic aquí para descargar tu archivo",
+                                data=f,
+                                file_name=pdf_filename,
+                                mime="application/pdf",
+                                use_container_width=True
+                            )
+                        
+                        if os.path.exists("temp_perfil.png"):
+                            os.remove("temp_perfil.png")
+
             else:
-                st.success("✅ El sistema opera con estabilidad.")
+                st.success("✅ El sistema opera con estabilidad. No hay datos que exportar.")
 
         else:
             st.error("❌ Formato inválido.")
     except Exception as e:
         st.error(f"Error al procesar: {e}")
+else:
+    st.info("👈 Por favor, ingresa tu archivo de perfil (.csv o .xlsx), introduce el nombre del acueducto y configura las variables en el menú lateral.")
+
+# 4. SECCIÓN BIBLIOGRÁFICA INSTITUCIONAL
+st.markdown("""
+<div class="discreet-note">
+    <strong>Fuentes técnicas e institucionales de referencia:</strong><br>
+    • Instituto de Ingeniería, UNAM. <em>Manual de análisis de la problemática del aire atrapado en acueductos, para mejorar su eficiencia.</em> Serie Manuales, México.<br>
+    • Wang, Y., Zhang, J., et al. (2023). <em>Air valve arrangement criteria for preventing secondary pipe bursts in long-distance gravitational water supply systems.</em> AQUA - Water Infrastructure, Ecosystems and Society, Vol 72 No 8, 1566. IWA Publishing.<br>
+    • Kalinske, A. A., & Bliss, P. H. (1943). <em>Removal of air from pipe lines by flowing water.</em> Civil Engineering, 13(10).<br>
+    • Zukoski, E. E. (1966). <em>Influence of viscosity, surface tension and inclination on motion of long bubbles in closed tubes.</em> Journal of Fluid Mechanics.
+</div>
+""", unsafe_allow_html=True)
